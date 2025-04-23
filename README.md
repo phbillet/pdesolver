@@ -2,6 +2,15 @@
 
 **PDESolver** is a powerful and modular Python library designed to numerically solve partial differential equations (PDEs) in 1D and 2D. Whether you're working on physics, engineering, or mathematical modeling problems, this tool provides the flexibility and precision needed to tackle complex PDEs efficiently.
 
+### **Author's note:**
+- This project was started at the beginning of April 2025 and both the code and this documentation have been entirely and iteratively generated using LLM. It is not bug-free and should not be used for professional purposes.
+- From a theoretical point of view, Chebyshev's pseudo-spectral method should be implemented for non-periodic boundary conditions, as indicated by some LLMs. A volume penalization has been added to alleviate this problem.
+- In spite of this, any contributions aimed at perfecting this code are welcome.
+
+---
+
+**Ready to solve your PDEs? Download PDESolver now and unlock the power of numerical PDE solving!**
+
 ---
 
 ## **Key Features**
@@ -44,13 +53,13 @@
 ### **Supported Equations**
 PDESolver can handle a wide variety of PDEs, including but not limited to:
 - **Heat equation**:  
-  $ ∂ₜu = ∂ₓₓu $
+   ∂ₜu = ∂ₓₓu 
 - **Wave equation**:  
-  $ ∂ₜₜu = ∂ₓₓu $
+   ∂ₜₜu = ∂ₓₓu 
 - **Nonlinear Schrödinger equation**:  
-  $ i∂ₜu = -∂ₓₓu + |u|²u $
+   i∂ₜu = -∂ₓₓu + |u|²u 
 - Custom equations with pseudo-differential operators:
-  $ ∂ₜu = Op(k²)u + N(u) $
+   ∂ₜu = Op(k²)u + N(u) 
 
 ### **Symbolic Operators**
 For equations involving non-standard operators (e.g., fractional Laplacians), you can define them symbolically using the `Op` class:
@@ -114,9 +123,9 @@ equation = Eq(diff(u, t), Op(k**2, u))
 
 ### **2. Wave Propagation Analysis**
 - New method `analyze_wave_propagation()` to analyze:
-  - **Dispersion relation** ($ \omega(k) $)
-  - **Phase velocity** ($ v_p(k) = \omega / |k| $)
-  - **Group velocity** ($ v_g(k) = \nabla_k \omega(k) $)
+  - **Dispersion relation**: $ \omega(k) $
+  - **Phase velocity**: $ v_p(k) = \omega / |k| $
+  - **Group velocity**: $ v_g(k) = \nabla_k \omega(k) $
   - **Anisotropy** in 2D.
 
 ### **3. Symbol Plotting**
@@ -144,11 +153,16 @@ Currently, testing is partially covered by two dedicated notebooks: `PDE_symboli
 
 ## **License**
 
-PDESolver is released under the MIT License. Feel free to use, modify, and distribute it for academic, research, or commercial purposes.
+PDESolver is distributed under the [Apache License 2.0](https://www.apache.org/licenses/LICENSE-2.0).
 
----
+You are free to use, modify, and redistribute this software under the terms of this license.
+Redistributions must include appropriate copyright notices.
 
-**Ready to solve your PDEs? Download PDESolver now and unlock the power of numerical PDE solving!**
+### Author attribution
+
+If you use PDESolver in your project or derivative work, please retain the original author attribution:
+
+**Philippe Billet (2025)**  
 
 ---
 

@@ -1,3 +1,17 @@
+# Copyright 2025 Philippe Billet
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 import numpy as np
 import matplotlib.pyplot as plt
 from scipy.fft import fft2, ifft2, fft, ifft, fftfreq
@@ -5,9 +19,12 @@ from sympy import (
     symbols, Function, diff, exp, I, solve, pprint, Mul,
     lambdify, expand, Eq, Derivative, sin, cos, simplify, sqrt,
 )
+from scipy.io.wavfile import write
 from matplotlib.animation import FuncAnimation
 from IPython.display import HTML
 from functools import partial
+from scipy.io.wavfile import write
+from IPython.display import Audio
 plt.rcParams['text.usetex'] = False
 
 class Op(Function):
@@ -17,13 +34,15 @@ class Op(Function):
     nargs = 2
 
 class PDESolver:
-    def __init__(self, equation, boundary_condition='dirichlet', boundary_func=None, interpolation=True, time_scheme='default', dealiasing_ratio=2/3):
+    def __init__(self, equation, boundary_condition='dirichlet', boundary_func=None,
+                 interpolation=True, time_scheme='default', dealiasing_ratio=2/3,
+                 penalization=False, penalization_eta=1e-3):
         """
         Initialize the PDE solver with a given equation and boundary condition.
         Args:
             equation (sympy.Eq): Partial Differential Equation to solve.
-            boundary_condition (str, optional): Type of boundary condition. Defaults to 'dirichlet'.
-            interpolation (bool, optional): Whether to use interpolation for boundary conditions. Defaults to True.
+            boundary_condition (str): 'dirichlet','neumann','periodic','robin' or 'penalization'.
+            penalization_eta (float): penalization parameter η for non-periodic BC.
         Raises:
             ValueError: If the equation does not contain exactly one unknown function or 
                         if the function does not depend on t, x, y.
@@ -31,6 +50,8 @@ class PDESolver:
         self.interpolation = interpolation
         self.time_scheme = time_scheme # 'default'  or 'ETD-RK4'
         self.dealiasing_ratio = dealiasing_ratio
+        self.penalization = penalization
+        self.penalization_eta = penalization_eta
         
         print("\n*********************************")
         print("* Partial differential equation *")
@@ -1155,7 +1176,9 @@ class PDESolver:
         print("*******************\n")
         
         save_interval = max(1, self.Nt // self.n_frames)
-    
+        
+        self.energy_history = []   
+        
         for step in range(self.Nt):
             # 🚫 Mask out-of-domain points before update
             if self.domain_mask is not None:
@@ -1221,7 +1244,14 @@ class PDESolver:
     
                     else:
                         raise NotImplementedError("Unsupported spatial dimension")
-    
+                        
+                # Apply penalization for all BC except periodic
+                if self.penalization and self.boundary_condition != 'periodic' and self.domain_mask is not None and np.any(self.domain_mask < 1):
+                    chi = self.domain_mask.astype(float)
+                    u_new = u_new - (chi / self.penalization_eta) * u_new
+                    if self.temporal_order == 2:
+                        v_new = v_new - (chi / self.penalization_eta) * v_new
+                
                 # 🚫 Masquer les points hors domaine
                 if self.domain_mask is not None:
                     u_new[~self.domain_mask] = 0
@@ -1235,6 +1265,10 @@ class PDESolver:
             # ⏱️ Enregistrement des résultats
             if step % save_interval == 0:
                 self.frames.append(self.u_prev.copy())
+
+            if self.temporal_order == 2:
+                E = self.compute_energy()
+                self.energy_history.append(E)
 
     
     def step_ETD_RK4(self, u):
@@ -1417,99 +1451,84 @@ class PDESolver:
     
             ani = FuncAnimation(fig, update, frames=len(frame_indices), interval=50)
             return ani
+
+    def compute_energy(self):
+        """
+        Compute total energy of the wave equation:
+            E(t) = 1/2 ∫ [ (∂_t u)^2 + |∇u|^2 ] dx
+        Supports 1D and 2D cases. Only meaningful if temporal_order == 2.
+        """
+        if self.temporal_order != 2 or self.v_prev is None:
+            return None
     
-
-    def _apply_rectangular_boundary(self, u):
-        """Dispatch to appropriate rectangular boundary condition method."""
-        handler = self._get_boundary_handler()
-        handler(u)
-
-    def _get_boundary_handler(self):
-        """Return the boundary condition handler based on dimension and type."""
-        if self.dim == 1:
-            return getattr(self, f"_apply_{self.boundary_condition}_1D", self._unknown_boundary)
-        elif self.dim == 2:
-            return getattr(self, f"_apply_{self.boundary_condition}_2D", self._unknown_boundary)
+        u = self.u_prev
+        v = self.v_prev
+    
+        if u.ndim == 1:
+            # 1D case
+            dx = self.Lx / self.Nx
+            u_x = np.gradient(u, dx, axis=0)
+            energy_density = 0.5 * (u_x**2 + v**2)
+    
+            if self.domain_mask is not None:
+                energy_density *= self.domain_mask.astype(float)
+    
+            total_energy = np.sum(energy_density) * dx
+    
+        elif u.ndim == 2:
+            # 2D case
+            dx = self.Lx / self.Nx
+            dy = self.Ly / self.Ny
+            u_x = np.gradient(u, dx, axis=0)
+            u_y = np.gradient(u, dy, axis=1)
+            energy_density = 0.5 * (u_x**2 + u_y**2 + v**2)
+    
+            if self.domain_mask is not None:
+                energy_density *= self.domain_mask.astype(float)
+    
+            total_energy = np.sum(energy_density) * dx * dy
+    
         else:
-            raise ValueError("Only 1D and 2D supported.")
+            raise ValueError("Unsupported dimension for u.")
+    
+        return total_energy
 
-    def _unknown_boundary(self, u):
-        raise ValueError(f"Unknown boundary condition: {self.boundary_condition}")
-
-    def _apply_dirichlet_1D(self, u):
-        u[0] = self.boundary_func(self.X[0]) if self.boundary_func else 0
-        u[-1] = self.boundary_func(self.X[-1]) if self.boundary_func else 0
-
-    def _apply_dirichlet_2D(self, u):
-        if self.boundary_func:
-            u[0, :]  = self.boundary_func(self.X[0, :], self.Y[0, :])
-            u[-1, :] = self.boundary_func(self.X[-1, :], self.Y[-1, :])
-            u[:, 0]  = self.boundary_func(self.X[:, 0], self.Y[:, 0])
-            u[:, -1] = self.boundary_func(self.X[:, -1], self.Y[:, -1])
+    def plot_energy(self, log=False):
+        """
+        Plot the evolution of energy over time.
+        Supports both 1D and 2D wave simulations (requires temporal_order=2).
+        
+        Args:
+            log (bool): if True, plot energy on a logarithmic scale.
+        """
+        if not hasattr(self, 'energy_history') or not self.energy_history:
+            print("No energy data recorded. Call compute_energy() within solve().")
+            return
+    
+        import matplotlib.pyplot as plt
+    
+        # Time vector for plotting
+        t = np.linspace(0, self.Lt, len(self.energy_history))
+    
+        # Create the figure
+        plt.figure(figsize=(6, 4))
+        if log:
+            plt.semilogy(t, self.energy_history, label="Energy (log scale)")
         else:
-            u[0, :] = u[-1, :] = u[:, 0] = u[:, -1] = 0
+            plt.plot(t, self.energy_history, label="Energy")
+    
+        # Axis labels and title
+        plt.xlabel("Time")
+        plt.ylabel("Total energy")
+        plt.title("Energy evolution ({}D)".format(self.dim))
+    
+        # Display options
+        plt.grid(True)
+        plt.legend()
+        plt.tight_layout()
+        plt.show()
 
-    def _apply_periodic_1D(self, u):
-        u[0] = u[-2]
-        u[-1] = u[1]
-
-    def _apply_periodic_2D(self, u):
-        u[0, :] = u[-2, :]
-        u[-1, :] = u[1, :]
-        u[:, 0] = u[:, -2]
-        u[:, -1] = u[:, 1]
-
-    def _apply_neumann_1D(self, u):
-        u[0] = u[1]
-        u[-1] = u[-2]
-
-    def _apply_neumann_2D(self, u):
-        u[0, :] = u[1, :]
-        u[-1, :] = u[-2, :]
-        u[:, 0] = u[:, 1]
-        u[:, -1] = u[:, -2]
-
-    def _apply_robin_1D(self, u):
-        if self.boundary_func is None:
-            raise ValueError("Robin boundary condition requires a boundary_func returning (alpha, beta, g)")
-        dx = self.x_grid[1] - self.x_grid[0]
-
-        alpha_L, beta_L, g_L = self.boundary_func(np.array([self.X[0]]))
-        alpha_R, beta_R, g_R = self.boundary_func(np.array([self.X[-1]]))
-
-        dudn_L = (u[1] - u[0]) / dx
-        u[0] = (g_L - beta_L * dudn_L) / alpha_L
-
-        dudn_R = (u[-1] - u[-2]) / dx
-        u[-1] = (g_R - beta_R * dudn_R) / alpha_R
-
-    def _apply_robin_2D(self, u):
-        if self.boundary_func is None:
-            raise ValueError("Robin boundary condition requires a boundary_func(x, y) → (alpha, beta, g)")
-
-        dx = self.x_grid[1] - self.x_grid[0]
-        dy = self.y_grid[1] - self.y_grid[0]
-
-        x, y = self.X[0, :], self.Y[0, :]
-        alpha, beta, g = self.boundary_func(x, y)
-        dudx = (u[1, :] - u[0, :]) / dx
-        u[0, :] = (g - beta * dudx) / alpha
-
-        x, y = self.X[-1, :], self.Y[-1, :]
-        alpha, beta, g = self.boundary_func(x, y)
-        dudx = (u[-1, :] - u[-2, :]) / dx
-        u[-1, :] = (g - beta * dudx) / alpha
-
-        x, y = self.X[:, 0], self.Y[:, 0]
-        alpha, beta, g = self.boundary_func(x, y)
-        dudy = (u[:, 1] - u[:, 0]) / dy
-        u[:, 0] = (g - beta * dudy) / alpha
-
-        x, y = self.X[:, -1], self.Y[:, -1]
-        alpha, beta, g = self.boundary_func(x, y)
-        dudy = (u[:, -1] - u[:, -2]) / dy
-        u[:, -1] = (g - beta * dudy) / alpha
-
+    
     def test(self, u_exact, t_eval=None, norm='relative', threshold=1e-2, plot=True, component='real'):
         """
         Test the solver by comparing the numerical solution to an exact solution.
