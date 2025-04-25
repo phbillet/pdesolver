@@ -12,12 +12,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+
 import numpy as np
 import matplotlib.pyplot as plt
 from scipy.fft import fft2, ifft2, fft, ifft, fftfreq
 from sympy import (
     symbols, Function, diff, exp, I, solve, pprint, Mul,
     lambdify, expand, Eq, Derivative, sin, cos, simplify, sqrt,
+    Abs, Lambda, Piecewise, 
 )
 from scipy.io.wavfile import write
 from matplotlib.animation import FuncAnimation
@@ -34,24 +36,17 @@ class Op(Function):
     nargs = 2
 
 class PDESolver:
-    def __init__(self, equation, boundary_condition='dirichlet', boundary_func=None,
-                 interpolation=True, time_scheme='default', dealiasing_ratio=2/3,
-                 penalization=False, penalization_eta=1e-3):
+    def __init__(self, equation, time_scheme='default', dealiasing_ratio=2/3):
         """
         Initialize the PDE solver with a given equation and boundary condition.
         Args:
             equation (sympy.Eq): Partial Differential Equation to solve.
-            boundary_condition (str): 'dirichlet','neumann','periodic','robin' or 'penalization'.
-            penalization_eta (float): penalization parameter η for non-periodic BC.
         Raises:
             ValueError: If the equation does not contain exactly one unknown function or 
                         if the function does not depend on t, x, y.
         """
-        self.interpolation = interpolation
         self.time_scheme = time_scheme # 'default'  or 'ETD-RK4'
         self.dealiasing_ratio = dealiasing_ratio
-        self.penalization = penalization
-        self.penalization_eta = penalization_eta
         
         print("\n*********************************")
         print("* Partial differential equation *")
@@ -89,17 +84,11 @@ class PDESolver:
             self.ifft = partial(ifft2, workers=self.fft_workers)
         # Parse the equation
         self.temporal_order = 0  # Order of the temporal derivative
-        self.linear_terms, self.nonlinear_terms, self.symbol_terms = self.parse_equation(equation)
-
-        # Boundary condition type ('dirichlet', 'periodic', 'neumann' ou 'robin')
-        self.boundary_condition = boundary_condition
-        self.boundary_func = boundary_func 
+        self.linear_terms, self.nonlinear_terms, self.symbol_terms, self.source_terms = self.parse_equation(equation)
 
         # Initialisation des masques et informations pour domaine curviligne
         self.domain_mask = None
         self.boundary_mask = None
-        self.boundary_normals = None
-        self.boundary_curvature = None
 
         if self.dim == 1:
             self.kx = symbols('kx')
@@ -116,7 +105,8 @@ class PDESolver:
         Args:
             equation (sympy.Eq): Partial Differential Equation to parse.
         Returns:
-            tuple: Dictionary of linear terms, list of nonlinear terms, and list of extra symbolic terms with coefficients.
+            tuple: Dictionary of linear terms, list of nonlinear terms, list of extra symbolic terms with coefficients,
+                   and list of source terms.
         """
         def contains_u_and_derivative(expr, u_func):
             if expr.func == Mul:
@@ -132,31 +122,28 @@ class PDESolver:
         print("\n********************")
         print("* Equation parsing *")
         print("********************\n")
-    
         # Rewrite the equation in standard form: LHS - RHS = 0
         if isinstance(equation, Eq):
             lhs = equation.lhs - equation.rhs
         else:
             lhs = equation
-    
         print(f"\nEquation rewritten in standard form: {lhs}")
-    
         # Expand the equation
         lhs_expanded = expand(lhs)
         print(f"\nExpanded equation: {lhs_expanded}")
-    
         linear_terms = {}
         nonlinear_terms = []
         symbol_terms = []
-    
+        source_terms = []  # Nouvelle liste pour les termes sources
         # Extract custom Op() symbols from RHS (before any classification)
         for expr in lhs.atoms(Op):
+            print("expr : ", expr)
             full_term = [term for term in lhs.as_ordered_terms() if expr in term.args or term == expr]
+            print("full_term : ", full_term)
             if full_term:
                 coeff = full_term[0].as_coeff_mul()[0]
                 symbol_expr = expr.args[0]
                 symbol_terms.append((coeff, symbol_expr))
-    
         # Temporal derivative order detection
         self.temporal_order = 0
         for term in lhs_expanded.as_ordered_terms():
@@ -165,22 +152,17 @@ class PDESolver:
                 if deriv.expr == self.u and self.t in deriv.variables:
                     order = deriv.variables.count(self.t)
                     self.temporal_order = max(self.temporal_order, order)
-    
         print(f"Temporal derivative order detected: {self.temporal_order}")
-    
         # Parse terms, excluding Op(...) from classification
         for term in lhs_expanded.as_ordered_terms():
             print(f"Analyzing term: {term}")
-    
             if term.has(Op):
                 print("  --> Detected symbolic operator term (Op), excluded from classification.")
                 continue
-    
             if contains_u_and_derivative(term, self.u) or term.has(self.u**2) or term.has(self.u**3):
                 nonlinear_terms.append(term)
                 print("  --> Classified as nonlinear")
                 continue
-    
             derivs = term.atoms(Derivative)
             if derivs:
                 deriv = derivs.pop()
@@ -188,19 +170,19 @@ class PDESolver:
                 linear_terms[deriv] = linear_terms.get(deriv, 0) + coeff
                 print(f"  Derivative found: {deriv}")
                 print("  --> Classified as linear")
+            elif self.u in term.atoms(Function):
+                coeff = term.as_coefficients_dict().get(self.u, 1)
+                linear_terms[self.u] = linear_terms.get(self.u, 0) + coeff
+                print("  --> Classified as linear")
             else:
-                if self.u in term.atoms(Function):
-                    coeff = term.as_coefficients_dict().get(self.u, 1)
-                    linear_terms[self.u] = linear_terms.get(self.u, 0) + coeff
-                    print("  --> Classified as linear")
-                else:
-                    raise ValueError(f"Unrecognized term: {term}")
-    
+                # Nouvelle condition pour les termes sources
+                source_terms.append(term)
+                print("  --> Classified as source term")
         print(f"Final linear terms: {linear_terms}")
         print(f"Final nonlinear terms: {nonlinear_terms}")
         print(f"Symbol terms: {symbol_terms}")
-    
-        return linear_terms, nonlinear_terms, symbol_terms
+        print(f"Source terms: {source_terms}")
+        return linear_terms, nonlinear_terms, symbol_terms, source_terms
 
     def compute_linear_operator(self):
         """
@@ -544,7 +526,7 @@ class PDESolver:
             raise ValueError("Only 1D and 2D supported.")
 
 
-    def setup(self, Lx, Ly=None, Nx=None, Ny=None, Lt=1.0, Nt=100, initial_condition=None, initial_velocity=None, domain_func=None, boundary_func=None, n_frames=100):
+    def setup(self, Lx, Ly=None, Nx=None, Ny=None, Lt=1.0, Nt=100, initial_condition=None, initial_velocity=None, n_frames=100):
         """
         Set up the computational grid, initial conditions, and (optionally) the curvilinear domain.
         Args:
@@ -556,8 +538,6 @@ class PDESolver:
             Nt (int): Number of time steps.
             initial_condition (callable): Function generating the initial condition for u.
             initial_velocity (callable, optional): Function generating the initial condition for v (if temporal_order == 2).
-            domain_func (callable, optional): Characteristic function f(x,y) defining the curvilinear domain by f(x,y)<=0.
-                                              If None, the rectangular domain is used.
             n_frames (int): Number of pictures in the animation
         """
         self.Lt, self.Nt = Lt, Nt
@@ -595,12 +575,6 @@ class PDESolver:
             # No curvilinear domain in 1D
             self.domain_mask = None
             self.boundary_mask = None
-            self.boundary_normals = None
-            self.boundary_curvature = None
-    
-            # Boundary function
-            if boundary_func is not None:
-                self.boundary_func = boundary_func
     
             # Apply boundary condition
             self.apply_boundary(self.u_prev)
@@ -643,19 +617,6 @@ class PDESolver:
             self.exp_L = np.exp(self.L(self.KX, self.KY) * self.dt)
     
             self.u_prev = initial_condition(self.X, self.Y)
-    
-            if domain_func is not None:
-                dom = domain_func(self.X, self.Y) <= 0
-                self.domain_mask = dom.copy()
-                self._compute_boundary_info()
-            else:
-                self.domain_mask = np.ones_like(self.X, dtype=bool)
-                self.boundary_mask = None
-                self.boundary_normals = None
-                self.boundary_curvature = None
-    
-            if boundary_func is not None:
-                self.boundary_func = boundary_func
     
             self.apply_boundary(self.u_prev)
     
@@ -703,399 +664,16 @@ class PDESolver:
             self.analyze_wave_propagation()
             
     def apply_boundary(self, u):
-        """
-        Apply boundary conditions to the solution grid.
-        If a curvilinear domain is defined, the boundary condition is applied
-        only on the detected boundary. Otherwise, the conditions on the
-        rectangle are used.
-        Args:
-            u (numpy.ndarray): Solution grid to apply boundary conditions.
-        Raises:
-            ValueError: If an unknown boundary condition is specified.
-        """
-        # Processing points outside the domain (for all domain types)
-        if self.domain_mask is not None:
-            # Set all points outside the domain to zero
-            u[~self.domain_mask] = 0
-        
-        # Apply specific boundary conditions
-        if self.domain_mask is not None and self.boundary_mask is not None:
-            # Curvilinear domain
-            self._apply_curvilinear_boundary(u)
-        else:
-            # Rectangular domain
-            self._apply_rectangular_boundary(u)
-
-    def _apply_rectangular_boundary(self, u):
         """Apply boundary conditions for a rectangular domain."""
         if self.dim == 1:
-            if self.boundary_condition == 'dirichlet':
-                if self.boundary_func is not None:
-                    u[0] = self.boundary_func(self.X[0])
-                    u[-1] = self.boundary_func(self.X[-1])
-                else:
-                    u[0] = 0
-                    u[-1] = 0
-            elif self.boundary_condition == 'periodic':
-                u[0] = u[-2]
-                u[-1] = u[1]
-            elif self.boundary_condition == 'neumann':
-                u[0] = u[1]
-                u[-1] = u[-2]
-            elif self.boundary_condition == 'robin':
-                if self.boundary_func is None:
-                    raise ValueError("Robin boundary condition requires a boundary_func returning (alpha, beta, g)")
-                
-                alpha_L, beta_L, g_L = self.boundary_func(np.array([self.X[0]]))
-                alpha_R, beta_R, g_R = self.boundary_func(np.array([self.X[-1]]))
-                dx = self.x_grid[1] - self.x_grid[0]
-            
-                # Approximate du/dn ≈ (u[1] - u[0]) / dx
-                dudn_L = (u[1] - u[0]) / dx
-                u[0] = (g_L - beta_L * dudn_L) / alpha_L
-            
-                # Approximate du/dn ≈ (u[-1] - u[-2]) / dx
-                dudn_R = (u[-1] - u[-2]) / dx
-                u[-1] = (g_R - beta_R * dudn_R) / alpha_R
-            else:
-                raise ValueError(f"Unknown boundary condition: {self.boundary_condition}")
+            u[0] = u[-2]
+            u[-1] = u[1]
         elif self.dim == 2:
-            if self.boundary_condition == 'dirichlet':
-                if self.boundary_func is not None:
-                    u[0, :] = self.boundary_func(self.X[0, :], self.Y[0, :])
-                    u[-1, :] = self.boundary_func(self.X[-1, :], self.Y[-1, :])
-                    u[:, 0] = self.boundary_func(self.X[:, 0], self.Y[:, 0])
-                    u[:, -1] = self.boundary_func(self.X[:, -1], self.Y[:, -1])
-                else:
-                    u[0, :] = 0
-                    u[-1, :] = 0
-                    u[:, 0] = 0
-                    u[:, -1] = 0
-            elif self.boundary_condition == 'periodic':
-                u[0, :] = u[-2, :]
-                u[-1, :] = u[1, :]
-                u[:, 0] = u[:, -2]
-                u[:, -1] = u[:, 1]
-            elif self.boundary_condition == 'neumann':
-                u[0, :] = u[1, :]
-                u[-1, :] = u[-2, :]
-                u[:, 0] = u[:, 1]
-                u[:, -1] = u[:, -2]
-            elif self.boundary_condition == 'robin':
-                if self.boundary_func is None:
-                    raise ValueError("Robin boundary condition requires a boundary_func(x, y) → (alpha, beta, g)")
-            
-                dx = self.x_grid[1] - self.x_grid[0]
-                dy = self.y_grid[1] - self.y_grid[0]
-            
-                # Bord gauche (x = min)
-                x = self.X[0, :]
-                y = self.Y[0, :]
-                alpha, beta, g = self.boundary_func(x, y)
-                dudx = (u[1, :] - u[0, :]) / dx  # ∂u/∂x ≈ (u1 - u0)/dx
-                u[0, :] = (g - beta * dudx) / alpha
-            
-                # Bord droit (x = max)
-                x = self.X[-1, :]
-                y = self.Y[-1, :]
-                alpha, beta, g = self.boundary_func(x, y)
-                dudx = (u[-1, :] - u[-2, :]) / dx
-                u[-1, :] = (g - beta * dudx) / alpha
-            
-                # Bord bas (y = min)
-                x = self.X[:, 0]
-                y = self.Y[:, 0]
-                alpha, beta, g = self.boundary_func(x, y)
-                dudy = (u[:, 1] - u[:, 0]) / dy
-                u[:, 0] = (g - beta * dudy) / alpha
-            
-                # Bord haut (y = max)
-                x = self.X[:, -1]
-                y = self.Y[:, -1]
-                alpha, beta, g = self.boundary_func(x, y)
-                dudy = (u[:, -1] - u[:, -2]) / dy
-                u[:, -1] = (g - beta * dudy) / alpha
-            else:
-                raise ValueError(f"Unknown boundary condition: {self.boundary_condition}")
+            u[0, :] = u[-2, :]
+            u[-1, :] = u[1, :]
+            u[:, 0] = u[:, -2]
+            u[:, -1] = u[:, 1]
 
-
-    def _apply_curvilinear_boundary(self, u):
-        """Apply boundary conditions for a curvilinear domain."""
-        if self.boundary_func is not None and self.boundary_condition == 'robin':
-            # Robin condition: α u + β ∂u/∂n = g
-            alpha, beta, g = self.boundary_func(
-                self.X[self.boundary_mask], self.Y[self.boundary_mask]
-            )
-    
-            # Approximate ∂u/∂n using finite differences along normal direction
-            nx = self.boundary_normals[..., 0][self.boundary_mask]
-            ny = self.boundary_normals[..., 1][self.boundary_mask]
-    
-            dx = self.x_grid[1] - self.x_grid[0]
-            dy = self.y_grid[1] - self.y_grid[0]
-    
-            # Gradient of u
-            du_dx = (np.roll(u, -1, axis=0) - np.roll(u, 1, axis=0)) / (2 * dx)
-            du_dy = (np.roll(u, -1, axis=1) - np.roll(u, 1, axis=1)) / (2 * dy)
-    
-            du_dx_vals = du_dx[self.boundary_mask]
-            du_dy_vals = du_dy[self.boundary_mask]
-    
-            dudn = nx * du_dx_vals + ny * du_dy_vals
-    
-            # Solve α u = g - β ∂u/∂n
-            u[self.boundary_mask] = (g - beta * dudn) / alpha
-    
-            if self.interpolation:
-                u[:] = self._smooth_boundary_interpolation(u)
-            else:
-                u[:] = self._apply_smooth_boundary_condition(u)
-            return
-    
-        # Cas général : sans fonction de bord explicite
-        if self.boundary_func is not None:
-            u[self.boundary_mask] = self.boundary_func(
-                self.X[self.boundary_mask], self.Y[self.boundary_mask]
-            )
-            if self.interpolation:
-                u[:] = self._smooth_boundary_interpolation(u)
-            else:
-                u[:] = self._apply_smooth_boundary_condition(u)
-            return
-    
-        # Sinon, appliquer les cas standard
-        if self.boundary_condition == 'dirichlet':
-            u[self.boundary_mask] = 0
-        elif self.boundary_condition == 'neumann':
-            self._apply_curvilinear_neumann_improved(u)
-        elif self.boundary_condition == 'periodic':
-            self._apply_curvilinear_periodic(u)
-        else:
-            raise ValueError(f"Unknown boundary condition: {self.boundary_condition}")
-
-        
-    def _smooth_boundary_interpolation(self, u):
-        """Apply smooth interpolation at the boundary using a Laplacian smoother."""
-        # Create a copy of the current solution
-        u_smoothed = u.copy()
-        
-        # Identify boundary and near-boundary points
-        from scipy import ndimage
-        
-        # Create a dilated boundary (including points just inside and outside)
-        boundary_region = ndimage.binary_dilation(self.boundary_mask, iterations=5)
-        
-        # Points to exclude from smoothing (deep inside or far outside)
-        exclude_mask = ~boundary_region
-        
-        # Apply Laplacian smoothing to the boundary region
-        for _ in range(10):  # Number of smoothing iterations
-            # Create a convolution kernel for Laplacian smoothing
-            kernel = np.array([[0.05, 0.2, 0.05], 
-                               [0.2,  0.0, 0.2], 
-                               [0.05, 0.2, 0.05]])
-            
-            # Apply convolution while preserving original values in excluded regions
-            u_conv = ndimage.convolve(u_smoothed, kernel, mode='reflect')
-            
-            # Update only the boundary region
-            u_smoothed[boundary_region] = u_conv[boundary_region]
-            
-            # Ensure boundary conditions are preserved exactly on the actual boundary
-            u_smoothed[self.boundary_mask] = u[self.boundary_mask]
-            
-            # Keep the excluded regions unchanged
-            u_smoothed[exclude_mask] = u[exclude_mask]
-        
-        # Update the main grid
-        return u_smoothed
-    
-    def _apply_curvilinear_neumann(self, u):
-        """
-        Apply Neumann conditions (zero flux) for a curvilinear domain.
-        This method uses a gradient approximation to estimate the boundary normal.
-        """
-        # Identifying boundary points
-        boundary_points = np.argwhere(self.boundary_mask)
-        
-        # For each boundary point
-        for i, j in boundary_points:
-            # Create a small neighborhood around the point
-            i_min, i_max = max(0, i-1), min(self.Nx-1, i+1)
-            j_min, j_max = max(0, j-1), min(self.Ny-1, j+1)
-            
-            # Identify the interior points in this neighborhood
-            local_mask = self.domain_mask[i_min:i_max+1, j_min:j_max+1]
-            local_mask[i-i_min, j-j_min] = False  # Exclude the boundary point itself
-            
-            if np.any(local_mask):
-                # Average the values of neighboring interior points
-                local_u = u[i_min:i_max+1, j_min:j_max+1]
-                interior_values = local_u[local_mask]
-                u[i, j] = np.mean(interior_values)
-            else:
-                # No inner neighbors, use a larger approximation
-                u[i, j] = 0  # Default value    
-
-    def _apply_curvilinear_periodic(self, u):
-        """
-        Apply the periodic conditions for a curvilinear domain.
-        Note: This implementation assumes that the domain is approximately
-        similar to a rectangle with deformations, making it possible to identify
-        correspondences between boundary points.
-        """
-        # Find the limits of the domain
-        x_min, x_max = self.X[self.domain_mask].min(), self.X[self.domain_mask].max()
-        y_min, y_max = self.Y[self.domain_mask].min(), self.Y[self.domain_mask].max()
-        x_center = (x_min + x_max) / 2
-        y_center = (y_min + y_max) / 2
-        
-        # Divide the boundary into four regions (per quadrant)
-        boundary_points = np.argwhere(self.boundary_mask)
-        
-        for i, j in boundary_points:
-            x, y = self.X[i, j], self.Y[i, j]
-            
-            # Determine the approximate boundary region
-            x_rel = (x - x_center) / (x_max - x_min) * 2  # Normaliser à [-1, 1]
-            y_rel = (y - y_center) / (y_max - y_min) * 2  # Normaliser à [-1, 1]
-            
-            # Find the approximate “opposite” point
-            if abs(x_rel) > abs(y_rel):  # Mainly horizontal boundary
-                # Search in the opposite x direction
-                opposite_x = x_min if x > x_center else x_max
-                # Find the nearest boundary point opposite
-                candidates = boundary_points[(boundary_points[:, 0] != i) & 
-                                            (np.abs(self.Y[boundary_points[:, 0], boundary_points[:, 1]] - y) < 
-                                            (y_max - y_min) * 0.1)]
-                if len(candidates) > 0:
-                    distances = np.abs(self.X[candidates[:, 0], candidates[:, 1]] - opposite_x)
-                    closest_idx = np.argmin(distances)
-                    i_opposite, j_opposite = candidates[closest_idx]
-                    u[i, j] = u[i_opposite, j_opposite]
-            else:  # Mainly vertical boundary
-                # Search in the opposite y direction
-                opposite_y = y_min if y > y_center else y_max
-                # Find the nearest boundary point opposite
-                candidates = boundary_points[(boundary_points[:, 1] != j) & 
-                                            (np.abs(self.X[boundary_points[:, 0], boundary_points[:, 1]] - x) < 
-                                            (x_max - x_min) * 0.1)]
-                if len(candidates) > 0:
-                    distances = np.abs(self.Y[candidates[:, 0], candidates[:, 1]] - opposite_y)
-                    closest_idx = np.argmin(distances)
-                    i_opposite, j_opposite = candidates[closest_idx]
-                    u[i, j] = u[i_opposite, j_opposite]
-
-    def _compute_boundary_info(self):
-        """
-        Calculate detailed information about the curvilinear domain boundary.
-        This method improves boundary detection and calculates local normals.
-        """
-        if self.domain_mask is None:
-            return
-            
-        # Identify related domain and complementary components
-        from scipy import ndimage
-        labeled_domain, num_domain = ndimage.label(self.domain_mask)
-        labeled_exterior, num_exterior = ndimage.label(~self.domain_mask)
-        
-        # The boundary is the interface between these regions
-        boundary = np.zeros_like(self.domain_mask, dtype=bool)
-        
-        # For each domain component
-        for i in range(1, num_domain + 1):
-            domain_comp = (labeled_domain == i)
-            # Expand the domain and find the intersection with the exterior
-            dilated = ndimage.binary_dilation(domain_comp)
-            boundary |= (dilated & ~domain_comp)
-        
-        self.boundary_mask = boundary
-    
-        # Calculate signed distance field (SDF)
-        # Positive inside the domain, negative outside
-        distance_inside = ndimage.distance_transform_edt(self.domain_mask)
-        distance_outside = ndimage.distance_transform_edt(~self.domain_mask)
-        self.signed_distance = distance_inside - distance_outside
-        
-        # Calculate boundary normals (approximate gradient)
-        self.boundary_normals = np.zeros((self.Nx, self.Ny, 2))
-        
-        # Use a Sobel filter to calculate the mask gradient
-        dx = ndimage.sobel(self.domain_mask.astype(float), axis=0)
-        dy = ndimage.sobel(self.domain_mask.astype(float), axis=1)
-        
-        # Normalize the gradient to obtain the unit normal
-        norm = np.sqrt(dx**2 + dy**2)
-        mask = (norm > 0) & self.boundary_mask
-        self.boundary_normals[mask, 0] = dx[mask] / norm[mask]
-        self.boundary_normals[mask, 1] = dy[mask] / norm[mask]
-        
-        # Calculate local curvature (may be useful for certain applications)
-        self.boundary_curvature = np.zeros((self.Nx, self.Ny))
-        ddx = ndimage.sobel(dx / np.maximum(norm, 1e-10), axis=0)
-        ddy = ndimage.sobel(dy / np.maximum(norm, 1e-10), axis=1)
-        self.boundary_curvature[mask] = (ddx[mask] + ddy[mask])
-
-    def _apply_smooth_boundary_condition(self, u):
-        """
-        Apply boundary conditions with smooth transition based on signed distance.
-        """
-        # Define the width of the transition region
-        transition_width = 3.0  # in grid units
-        
-        # Calculate weights based on the signed distance field
-        # 1.0 at the boundary, smoothly decreasing to 0.0 within the transition width
-        weights = np.clip(1.0 - np.abs(self.signed_distance) / transition_width, 0.0, 1.0)
-        
-        # Apply boundary function where weights > 0
-        weight_mask = weights > 0
-        if np.any(weight_mask):
-            boundary_values = self.boundary_func(self.X[weight_mask], self.Y[weight_mask])
-            
-            # Apply weighted combination of boundary values and current values
-            u[weight_mask] = weights[weight_mask] * boundary_values + \
-                            (1.0 - weights[weight_mask]) * u[weight_mask]
-        
-        # Ensure exact boundary conditions at the actual boundary
-        u[self.boundary_mask] = self.boundary_func(
-            self.X[self.boundary_mask], self.Y[self.boundary_mask]
-        )
-        
-        return u 
-
-    def _apply_curvilinear_neumann_improved(self, u):
-        """
-        Apply Neumann's conditions for a curvilinear domain 
-        using calculated normals with reflection for zero-flux.
-        """
-        # Identifying boundary points
-        boundary_points = np.argwhere(self.boundary_mask)
-    
-        for i, j in boundary_points:
-            nx, ny = self.boundary_normals[i, j]
-            # Opposite direction (into the domain)
-            di = int(np.round(-nx))
-            dj = int(np.round(-ny))
-    
-            ni = i + di
-            nj = j + dj
-    
-            # Ensure neighbor is inside the domain
-            if (0 <= ni < self.Nx) and (0 <= nj < self.Ny) and self.domain_mask[ni, nj]:
-                # Reflect value to the boundary point
-                u[i, j] = u[ni, nj]
-            else:
-                # Fallback: use average of all neighbors inside domain
-                i_min = max(0, i - 1)
-                i_max = min(self.Nx, i + 2)
-                j_min = max(0, j - 1)
-                j_max = min(self.Ny, j + 2)
-                neighborhood = u[i_min:i_max, j_min:j_max]
-                mask = self.domain_mask[i_min:i_max, j_min:j_max]
-                if np.any(mask):
-                    u[i, j] = np.mean(neighborhood[mask])
-
-        
     def apply_nonlinear(self, u, is_v=False):
         """
         Apply nonlinear terms to the solution with dealiasing.
@@ -1180,11 +758,25 @@ class PDESolver:
         self.energy_history = []   
         
         for step in range(self.Nt):
-            # 🚫 Mask out-of-domain points before update
-            if self.domain_mask is not None:
-                self.u_prev[~self.domain_mask] = 0
-                if self.temporal_order == 2 and self.v_prev is not None:
-                    self.v_prev[~self.domain_mask] = 0
+            # Source term evaluation
+            if hasattr(self, 'source_terms') and self.source_terms:
+                source_contribution = np.zeros_like(self.X, dtype=np.float64)  # Initialize as zero array
+                for term in self.source_terms:
+                    try:
+                        if self.dim == 1:
+                            # 1D case: lambdify with (t, x)
+                            source_func = lambdify((self.t, self.x), term, 'numpy')
+                            source_contribution += source_func(step * self.dt, self.X)
+                        elif self.dim == 2:
+                            # 2D case: lambdify with (t, x, y)
+                            source_func = lambdify((self.t, self.x, self.y), term, 'numpy')
+                            source_contribution += source_func(step * self.dt, self.X, self.Y)
+                        else:
+                            raise ValueError("Unsupported dimension.")
+                    except Exception as e:
+                        print(f"Error evaluating source term {term}: {e}")
+            else:
+                source_contribution = 0
     
             if self.temporal_order == 1:
                 if hasattr(self, 'time_scheme') and self.time_scheme == 'ETD-RK4':
@@ -1200,13 +792,11 @@ class PDESolver:
                         u_hat *= self.exp_L
                         u_hat *= self.dealiasing_mask
                         u_lin = self.ifft(u_hat)
-    
+                           
                     u_nl = self.apply_nonlinear(u_lin)
                     u_new = u_lin + u_nl
-    
-                # 🚫 Remasquer après calcul
-                if self.domain_mask is not None:
-                    u_new[~self.domain_mask] = 0
+                    
+                u_new = u_new + source_contribution
     
                 # ✅ Appliquer conditions aux bords
                 self.apply_boundary(u_new)
@@ -1241,21 +831,15 @@ class PDESolver:
     
                         u_new = self.ifft(u_new_hat)
                         v_new = self.ifft(v_new_hat)
+
+                        u_nl = self.apply_nonlinear(u_new, is_v=False)
+                        v_nl = self.apply_nonlinear(v_new, is_v=True)
+                        u_new += u_nl + source_contribution * self.dt**2 / 2
+                        v_new += v_nl + source_contribution * self.dt
     
                     else:
                         raise NotImplementedError("Unsupported spatial dimension")
                         
-                # Apply penalization for all BC except periodic
-                if self.penalization and self.boundary_condition != 'periodic' and self.domain_mask is not None and np.any(self.domain_mask < 1):
-                    chi = self.domain_mask.astype(float)
-                    u_new = u_new - (chi / self.penalization_eta) * u_new
-                    if self.temporal_order == 2:
-                        v_new = v_new - (chi / self.penalization_eta) * v_new
-                
-                # 🚫 Masquer les points hors domaine
-                if self.domain_mask is not None:
-                    u_new[~self.domain_mask] = 0
-                    v_new[~self.domain_mask] = 0
     
                 self.apply_boundary(u_new)
                 self.apply_boundary(v_new)
@@ -1470,9 +1054,6 @@ class PDESolver:
             u_x = np.gradient(u, dx, axis=0)
             energy_density = 0.5 * (u_x**2 + v**2)
     
-            if self.domain_mask is not None:
-                energy_density *= self.domain_mask.astype(float)
-    
             total_energy = np.sum(energy_density) * dx
     
         elif u.ndim == 2:
@@ -1482,9 +1063,6 @@ class PDESolver:
             u_x = np.gradient(u, dx, axis=0)
             u_y = np.gradient(u, dy, axis=1)
             energy_density = 0.5 * (u_x**2 + u_y**2 + v**2)
-    
-            if self.domain_mask is not None:
-                energy_density *= self.domain_mask.astype(float)
     
             total_energy = np.sum(energy_density) * dx * dy
     
@@ -1532,7 +1110,7 @@ class PDESolver:
     def test(self, u_exact, t_eval=None, norm='relative', threshold=1e-2, plot=True, component='real'):
         """
         Test the solver by comparing the numerical solution to an exact solution.
-    
+        
         Args:
             u_exact (callable): Exact solution function u(x[, y], t).
             t_eval (float, optional): Time at which to compare (default: final time).
@@ -1541,15 +1119,26 @@ class PDESolver:
             plot (bool): Whether to display plots.
             component (str): 'real', 'imag', or 'abs' for comparison.
         """
-    
         if t_eval is None:
             t_eval = self.Lt
-        u_num = self.frames[-1]
     
+        # Find the closest frame index corresponding to time t_eval
+        save_interval = max(1, self.Nt // self.n_frames)
+        frame_times = np.arange(0, self.Lt + self.dt, save_interval * self.dt)  # All possible times
+        frame_index = np.argmin(np.abs(frame_times - t_eval))  # Closest index
+        actual_t = frame_times[frame_index]
+        print(f"Closest available time to t_eval={t_eval}: {actual_t}")
+    
+        if frame_index >= len(self.frames):
+            raise ValueError(f"Time t = {t_eval} exceeds simulation duration.")
+        
+        u_num = self.frames[frame_index]
+    
+        # Compute the exact solution at the actual time
         if self.dim == 1:
-            u_ex = u_exact(self.X, t_eval)
+            u_ex = u_exact(self.X, actual_t)
         elif self.dim == 2:
-            u_ex = u_exact(self.X, self.Y, t_eval)
+            u_ex = u_exact(self.X, self.Y, actual_t)
         else:
             raise ValueError("Unsupported dimension.")
     
@@ -1574,8 +1163,8 @@ class PDESolver:
         else:
             raise ValueError("Unknown norm type.")
     
-        print(f"Test error = {error:.3e}")
-        assert error < threshold, f"Error too large: {error:.3e}"
+        print(f"Test error at t = {actual_t}: {error:.3e}")
+        assert error < threshold, f"Error too large at t = {actual_t}: {error:.3e}"
     
         # Optional plots
         if plot:
@@ -1585,7 +1174,7 @@ class PDESolver:
                 plt.plot(self.X, np.real(u_num), label='Numerical')
                 plt.plot(self.X, np.real(u_ex), label='Exact', linestyle='--')
                 plt.legend()
-                plt.title(f'Solution at t = {t_eval}, error = {error:.2e}')
+                plt.title(f'Solution at t = {actual_t}, error = {error:.2e}')
                 plt.grid()
     
                 plt.subplot(2, 1, 2)

@@ -1,153 +1,155 @@
-# PDESolver: A Flexible Python Framework for Solving Partial Differential Equations (PDEs)
+# PDESolver: A Python Framework for Solving Partial Differential Equations
 
-**PDESolver** is a powerful and modular Python library designed to numerically solve partial differential equations (PDEs) in 1D and 2D. Whether you're working on physics, engineering, or mathematical modeling problems, this tool provides the flexibility and precision needed to tackle complex PDEs efficiently.
+## Overview
 
-### **Author's note:**
-- This project was started at the beginning of April 2025 and both the code and this documentation have been entirely and iteratively generated using LLM. It is not bug-free and should not be used for professional purposes.
-- From a theoretical point of view, Chebyshev's pseudo-spectral method should be implemented for non-periodic boundary conditions, as indicated by some LLMs. A volume penalization has been added to alleviate this problem.
-- In spite of this, any contributions aimed at perfecting this code are welcome.
+`PDESolver` is a flexible and modular Python framework designed to solve partial differential equations (PDEs) numerically. It supports both 1D and 2D problems, and provides tools for analyzing wave propagation, stability, and energy conservation. The code leverages advanced numerical techniques such as spectral methods (via FFT), exponential time differencing (ETD), and Runge-Kutta schemes for temporal integration.
 
----
-
-**Ready to solve your PDEs? Download PDESolver now and unlock the power of numerical PDE solving!**
+This framework is particularly useful for researchers, engineers, and students working on physical simulations involving PDEs, including wave equations, diffusion processes, and nonlinear dynamics.
 
 ---
 
-## **Key Features**
+## Key Features
 
-### **1. Versatile Equation Parsing**
-- Automatically parse and classify terms of your PDE into **linear**, **nonlinear**, and **symbolic** components.
-- Support for symbolic operators (`Op`) in Fourier space, enabling the use of custom pseudo-differential operators.
-- Handles equations with derivatives of any order in time (`t`) and space (`x`, `y`).
-
-### **2. Advanced Linear Operator Computation**
-- Compute the **spectral symbol** of the linear operator directly in Fourier space.
-- Automatically derive the **dispersion relation** and handle both first-order (`∂ₜu = Lu + N(u)`) and second-order (`∂ₜₜu = Lu + N(u)`) temporal derivatives.
-- Supports fully symbolic operators for problems where explicit differentiation is not feasible.
-
-### **3. Robust Numerical Methods**
-- **Exponential Time Differencing (ETD)** schemes:
-  - Default exponential integration (`e^{LΔt}`).
-  - High-order **ETD-RK4** for improved accuracy.
-- **Dealiasing** to prevent aliasing errors in nonlinear terms.
-- Stability checks, including **CFL condition verification** and spectral analysis of the linear operator.
-
-### **4. Flexible Boundary Conditions**
-- Handle a wide range of boundary conditions:
-  - **Dirichlet**, **Neumann**, **Robin**, and **periodic**.
-  - Curvilinear domains defined by characteristic functions (`f(x, y) ≤ 0`).
-- Smooth interpolation near boundaries for enhanced accuracy.
-- Improved handling of Neumann conditions using calculated normals for curvilinear domains.
-
-### **5. Visualization Tools**
-- Animate solutions in real-time:
-  - 1D: Line plots showing evolution over time.
-  - 2D: Surface plots with optional overlays (e.g., contours or fronts).
-- Built-in tools for testing against exact solutions and visualizing error distributions.
-- Enhanced wave propagation analysis for second-order temporal derivatives.
+- **Symbolic Parsing**: Automatically parses symbolic equations provided by the user to separate linear, nonlinear, and source terms.
+- **Spectral Methods**: Uses Fast Fourier Transform (FFT) for spatial discretization, ensuring high accuracy and efficiency.
+- **Dealiasing**: Implements spectral dealiasing to reduce aliasing errors in nonlinear terms.
+- **Time Integration Schemes**:
+  - Supports first-order and second-order temporal derivatives.
+  - Includes default exponential integration and optional ETD-RK4 schemes for improved stability.
+- **Wave Analysis**:
+  - Computes dispersion relations, phase velocities, and group velocities.
+  - Analyzes anisotropy in 2D systems.
+- **Energy Conservation**: Computes total energy over time for second-order systems, aiding in stability analysis.
+- **Visualization Tools**:
+  - Animates solutions in 1D (line plots) and 2D (surface plots).
+  - Provides overlays for contour lines or gradient fronts in 2D animations.
+- **Testing and Validation**: Compares numerical solutions with exact solutions to ensure accuracy.
 
 ---
 
-## **Equation Examples**
+## Installation
 
-### **Supported Equations**
-PDESolver can handle a wide variety of PDEs, including but not limited to:
-- **Heat equation**:  
-   ∂ₜu = ∂ₓₓu 
-- **Wave equation**:  
-   ∂ₜₜu = ∂ₓₓu 
-- **Nonlinear Schrödinger equation**:  
-   i∂ₜu = -∂ₓₓu + |u|²u 
-- Custom equations with pseudo-differential operators:
-   ∂ₜu = Op(k²)u + N(u) 
+### Prerequisites
 
-### **Symbolic Operators**
-For equations involving non-standard operators (e.g., fractional Laplacians), you can define them symbolically using the `Op` class:
-```python
-from sympy import symbols, Function
-k = symbols('k')
-u = Function('u')(t, x)
-equation = Eq(diff(u, t), Op(k**2, u))
+- Python 3.8 or higher
+- Required libraries: `numpy`, `scipy`, `matplotlib`, `sympy`
+
+### Installing Dependencies
+
+You can install the required libraries using `pip`:
+
+```bash
+pip install numpy scipy matplotlib sympy
+```
+
+### Downloading the Code
+
+Clone this repository to your local machine:
+
+```bash
+git clone https://github.com/phbillet/pdesolver.git
+cd PDESolver
 ```
 
 ---
 
-## **Why Choose PDESolver?**
+## Usage
 
-- **Ease of Use**: Set up and solve complex PDEs with minimal code.
-- **Modularity**: Each component (parsing, boundary conditions, integration) is encapsulated for clarity and extensibility.
-- **Performance**: Optimized FFT-based computations ensure fast and accurate results.
-- **Flexibility**: From simple rectangular domains to curvilinear geometries, PDESolver adapts to your problem's needs.
+### Step 1: Define Your PDE
+
+The solver accepts symbolic equations defined using SymPy. For example, to define a wave equation:
+
+```python
+from PDESolver import PDESolver
+
+# Define symbols
+t, x = symbols('t x')
+u = Function('u')(t, x)
+
+# Define the PDE
+equation = Eq(diff(u, t, t) - diff(u, x, x), 0)
+```
+
+### Step 2: Initialize the Solver
+
+Pass the equation to the `PDESolver` class:
+
+```python
+solver = PDESolver(equation)
+```
+
+### Step 3: Set Up the Domain and Initial Conditions
+
+Configure the computational domain, grid resolution, and initial conditions:
+
+```python
+def initial_condition(x):
+    return np.exp(-x**2)  # Example: Gaussian pulse
+
+solver.setup(
+    Lx=10, Nx=256, Lt=5, Nt=1000,
+    initial_condition=initial_condition
+)
+```
+
+For second-order systems, you may also need to provide an initial velocity:
+
+```python
+def initial_velocity(x):
+    return np.zeros_like(x)
+
+solver.setup(
+    Lx=10, Nx=256, Lt=5, Nt=1000,
+    initial_condition=initial_condition,
+    initial_velocity=initial_velocity
+)
+```
+
+### Step 4: Solve the PDE
+
+Run the solver to compute the solution:
+
+```python
+solver.solve()
+```
+
+### Step 5: Visualize Results
+
+Animate the solution to observe its evolution over time:
+
+```python
+ani = solver.animate(component='abs')
+```
+
+You can also plot the energy evolution for second-order systems:
+
+```python
+solver.plot_energy(log=True)
+```
 
 ---
 
-## **Quick Start**
+## Testing
 
-1. **Install Dependencies**:
-   ```bash
-   pip install numpy scipy matplotlib sympy
-   ```
+The framework includes a testing utility to compare numerical solutions with exact solutions:
 
-2. **Define Your PDE**:
-   ```python
-   from sympy import symbols, Function, diff, Eq
-   from PDESolver import PDESolver
+```python
+def exact_solution(x, t):
+    return np.exp(-(x - t)**2)  # Example: Traveling Gaussian wave
 
-   t, x = symbols('t x')
-   u = Function('u')(t, x)
-   equation = Eq(diff(u, t), diff(u, x, x))  # Heat equation
-   solver = PDESolver(equation, boundary_condition='dirichlet')
-   ```
-
-3. **Set Up and Solve**:
-   ```python
-   def initial_condition(x):
-       return np.exp(-x**2)
-
-   solver.setup(Lx=10, Nx=256, Lt=1.0, Nt=100, initial_condition=initial_condition)
-   solver.solve()
-   ```
-
-4. **Visualize**:
-   ```python
-   ani = solver.animate(component='abs')
-   ```
+solver.test(exact_solution, t_eval=2.5, norm='relative', plot=True)
+```
+Currently, testing is quite well covered by two dedicated notebooks: PDE_symbolic_tester.ipynb ensures that symbolic solutions and initial conditions are valid, while PDESolver_tester.ipynb (with 24 tests, that can be used as examples) uses these initial conditions to validate the solver's performance. 
 
 ---
 
-## **New Features and Improvements**
+## Contributing
 
-### **1. Enhanced Boundary Handling**
-- Improved **Neumann boundary conditions** for curvilinear domains using calculated normals.
-- Added support for **smooth interpolation** at boundaries to reduce artifacts.
+Contributions are welcome! If you'd like to contribute to this project, please follow these steps:
 
-### **2. Wave Propagation Analysis**
-- New method `analyze_wave_propagation()` to analyze:
-  - **Dispersion relation**: $ \omega(k) $
-  - **Phase velocity**: $ v_p(k) = \omega / |k| $
-  - **Group velocity**: $ v_g(k) = \nabla_k \omega(k) $
-  - **Anisotropy** in 2D.
-
-### **3. Symbol Plotting**
-- Visualize the spectral symbol (`L_symbolic`) in 1D and 2D using `plot_symbol()`.
-- Options to plot the real part, imaginary part, or magnitude of the symbol.
-
-### **4. Testing and Validation**
-- Added `test()` method to compare numerical solutions against exact solutions.
-- Comprehensive error analysis with options for relative and absolute norms.
-
-### **5. Performance Optimizations**
-- Improved dealiasing logic to enhance stability for high-frequency components.
-- Optimized FFT workers for faster computations.
-
----
-
-## **Contribute and Support**
-
-- **Download**: Clone the repository and start solving your PDEs today!
-- **Issues**: Found a bug or have a feature request? Open an issue on GitHub.
-- **Contributions**: We welcome contributions! Whether it's improving documentation, adding new features, or optimizing performance, your input is valuable.  
-Currently, testing is partially covered by two dedicated notebooks: `PDE_symbolic_tester.ipynb` ensures that symbolic solutions and initial conditions are valid, while `PDESolver_tester.ipynb` uses these initial conditions to validate the solver's performance. However, there is still significant work to be done to expand the test coverage and improve robustness. Any contributions to enhance the testing framework or add new test cases are highly appreciated!
+1. Fork the repository.
+2. Create a new branch for your feature or bug fix.
+3. Submit a pull request with a detailed description of your changes.
 
 ---
 
