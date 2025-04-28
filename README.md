@@ -60,7 +60,7 @@ cd PDESolver
 The solver accepts symbolic equations defined using SymPy. For example, to define a wave equation:
 
 ```python
-from PDESolver import PDESolver
+from pdesolver import PDESolver
 
 # Define symbols
 t, x = symbols('t x')
@@ -130,6 +130,7 @@ solver.plot_energy(log=True)
 ---
 
 ## Testing
+Currently, testing is quite well covered by two dedicated notebooks: PDE_symbolic_tester.ipynb ensures that symbolic solutions and initial conditions are valid, while PDESolver_tester.ipynb (with 27 tests, that can be used as examples) uses these initial conditions to validate the solver's performance. 
 
 The framework includes a testing utility to compare numerical solutions with exact solutions:
 
@@ -139,7 +140,19 @@ def exact_solution(x, t):
 
 solver.test(exact_solution, t_eval=2.5, norm='relative', plot=True)
 ```
-Currently, testing is quite well covered by two dedicated notebooks: PDE_symbolic_tester.ipynb ensures that symbolic solutions and initial conditions are valid, while PDESolver_tester.ipynb (with 24 tests, that can be used as examples) uses these initial conditions to validate the solver's performance. 
+
+---
+## Formulation of Differential Operators: Derivatives and Fourier-Space Symbols
+
+In `PDESolver`, linear operators can be formulated in two equivalent ways: either using classical derivatives (`diff`) or using symbolic Fourier-space expressions with `Op(symbol, u)`. Both approaches are internally unified by the solver during the setup phase.
+
+When derivatives are used, such as `diff(u, x, 2)` or `diff(u, t, t)`, the solver automatically translates them into their Fourier counterparts. Spatial derivatives (`x`, `y`) are mapped to powers of `i kx` and `i ky`, while time derivatives (`t`) introduce powers of `-i ω`. This allows the solver to infer the full symbolic dispersion relation without requiring the user to manually define it.
+
+Alternatively, users can directly specify pseudo-differential operators using `Op(symbol, u)`, where `symbol` is an explicit function of the Fourier variables `kx`, `ky`, or the temporal frequency `omega`. This is useful for fractional derivatives, nonlocal operators, or custom dispersions. 
+
+Both methods are fully compatible and can be mixed within the same PDE. Care must be taken to express spatial dependencies in terms of `kx`, `ky`, and temporal dependencies using `omega`, to ensure correct symbolic treatment.
+
+Choosing between derivatives and symbolic expressions offers flexibility: use derivatives for standard PDEs, and `Op` when precise control over the Fourier symbol is needed.
 
 ---
 
