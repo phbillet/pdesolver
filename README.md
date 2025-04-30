@@ -24,6 +24,9 @@ This framework is particularly useful for researchers, engineers, and students w
   - Animates solutions in 1D (line plots) and 2D (surface plots).
   - Provides overlays for contour lines or gradient fronts in 2D animations.
 - **Testing and Validation**: Compares numerical solutions with exact solutions to ensure accuracy.
+- **Limitation**: Only the periodic boundary condition is proposed, because of the use of the spectral method (based on the Fourier transform), which implies :
+    - the function defining the initial condition must be periodic, 
+    - the initial condition must be compactly supported (far from the boundary of the domain).
 
 ---
 
@@ -130,7 +133,7 @@ solver.plot_energy(log=True)
 ---
 
 ## Testing
-Currently, testing is quite well covered by two dedicated notebooks: PDE_symbolic_tester.ipynb ensures that symbolic solutions and initial conditions are valid, while PDESolver_tester.ipynb (with 27 tests, that can be used as examples) uses these initial conditions to validate the solver's performance. 
+Currently, testing is quite well covered by two dedicated notebooks: PDE_symbolic_tester.ipynb ensures that symbolic solutions and initial conditions are valid, while PDESolver_tester_1D.ipynb (with 18 tests) and PDESolver_tester_2D.ipynb (with 8 tests) use these initial conditions to validate the solver's performance.
 
 The framework includes a testing utility to compare numerical solutions with exact solutions:
 

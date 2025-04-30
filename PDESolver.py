@@ -19,7 +19,7 @@ from scipy.fft import fft2, ifft2, fft, ifft, fftfreq
 from sympy import (
     symbols, Function, diff, exp, I, solve, pprint, Mul,
     lambdify, expand, Eq, Derivative, sin, cos, simplify, sqrt,
-    Abs, Lambda, Piecewise, Basic, degree, Pow
+    Abs, Lambda, Piecewise, Basic, degree, Pow, preorder_traversal,
 )
 from scipy.io.wavfile import write
 from matplotlib.animation import FuncAnimation
@@ -37,14 +37,36 @@ class Op(Function):
     nargs = 2
 
 class PDESolver:
+    """
+    A PDE solver based on spectral methods using Fourier transforms.
+
+    Features:
+        - Handles symbolic PDEs via sympy
+        - Supports 1D and 2D problems
+        - Temporal integration schemes: default exponential time stepping and ETD-RK4
+        - Nonlinear terms handled via pseudo-spectral method
+        - Visualization and analysis tools included
+
+    Example usage:
+    >>> from sympy import Function, diff, symbols
+    >>> u = Function('u')
+    >>> t, x = symbols('t x')
+    >>> eq = Eq(diff(u(t,x), t), diff(u(t,x), x, 2) + u(t,x)**2)
+    >>> def initial(x): return np.sin(x)
+    >>> solver = PDESolver(eq)
+    >>> solver.setup(Lx=2*np.pi, Nx=128, Lt=1.0, Nt=1000, initial_condition=initial)
+    >>> solver.solve()
+    >>> ani = solver.animate()
+    >>> HTML(ani.to_jshtml())
+    """
     def __init__(self, equation, time_scheme='default', dealiasing_ratio=2/3):
         """
-        Initialize the PDE solver with a given equation and boundary condition.
+        Initialize the PDE solver with a given equation.
+
         Args:
-            equation (sympy.Eq): Partial Differential Equation to solve.
-        Raises:
-            ValueError: If the equation does not contain exactly one unknown function or 
-                        if the function does not depend on t, x, y.
+            equation (sympy.Eq): The PDE to solve.
+            time_scheme (str): 'default' or 'ETD-RK4'
+            dealiasing_ratio (float): Ratio for dealiasing mask (e.g., 2/3)
         """
         self.time_scheme = time_scheme # 'default'  or 'ETD-RK4'
         self.dealiasing_ratio = dealiasing_ratio
@@ -90,10 +112,6 @@ class PDESolver:
         self.source_terms = []
         self.temporal_order = 0  # Order of the temporal derivative
         self.linear_terms, self.nonlinear_terms, self.symbol_terms, self.source_terms = self.parse_equation(equation)
-
-        # Initialisation des masques et informations pour domaine curviligne
-        self.domain_mask = None
-        self.boundary_mask = None
 
         if self.dim == 1:
             self.kx = symbols('kx')
@@ -204,7 +222,7 @@ class PDESolver:
         print(f"Final nonlinear terms: {nonlinear_terms}")
         print(f"Symbol terms: {symbol_terms}")
         print(f"Source terms: {source_terms}")
-        return linear_terms, nonlinear_terms, symbol_terms, source_terms
+        return linear_terms, nonlinear_terms, symbol_terms, source_terms        
 
     def compute_linear_operator(self):
         """
@@ -369,10 +387,6 @@ class PDESolver:
             # Initial condition
             self.u_prev = initial_condition(self.X)
     
-            # No curvilinear domain in 1D
-            self.domain_mask = None
-            self.boundary_mask = None
-    
             # Apply boundary condition
             self.apply_boundary(self.u_prev)
     
@@ -536,6 +550,10 @@ class PDESolver:
     def solve(self):
         """
         Solve the PDE with the chosen time integration scheme.
+        Handles both first-order and second-order in time equations.
+        Supports:
+            - Default exponential time-stepping (linear propagation + nonlinear correction)
+            - ETD-RK4 (Exponential Time Differencing Runge-Kutta of 4th order)
         """
         print("\n*******************")
         print("* Solving the PDE *")
@@ -614,6 +632,15 @@ class PDESolver:
 
         
     def step_ETD_RK4(self, u):
+        """
+        Perform one ETD-RK4 time step for first-order time PDEs.
+        
+        Args:
+            u (np.ndarray): Current solution in real space
+        
+        Returns:
+            np.ndarray: Updated solution in real space
+        """
         dt = self.dt
         L_fft = self.L(self.KX) if self.dim == 1 else self.L(self.KX, self.KY)
     
@@ -653,7 +680,14 @@ class PDESolver:
 
     def step_ETD_RK4_order2(self, u, v):
         """
-        Perform one ETD-RK4 step for second-order time PDEs.
+        Perform one ETD-RK4 time step for second-order time PDEs.
+    
+        Args:
+            u (np.ndarray): Current solution in real space
+            v (np.ndarray): Current derivative in real space
+    
+        Returns:
+            tuple: Updated (u_new, v_new)
         """
         dt = self.dt
     
