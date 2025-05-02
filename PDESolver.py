@@ -17,16 +17,25 @@ import numpy as np
 import matplotlib.pyplot as plt
 from scipy.fft import fft2, ifft2, fft, ifft, fftfreq
 from sympy import (
-    symbols, Function, diff, exp, I, solve, pprint, Mul,
-    lambdify, expand, Eq, Derivative, sin, cos, simplify, sqrt,
-    Abs, Lambda, Piecewise, Basic, degree, Pow, preorder_traversal,
+    symbols, Function, 
+    solve, pprint, Mul,
+    lambdify, expand, Eq, simplify, trigsimp, N,
+    Lambda, Piecewise, Basic, degree, Pow, preorder_traversal,
+    sqrt, 
+    I,  pi,
+    re, im, arg, Abs, conjugate, 
+    sin, cos, tan, cot, sec, csc, sinc,
+    asin, acos, atan, acot, asec, acsc,
+    sinh, cosh, tanh, coth, sech, csch,
+    asinh, acosh, atanh, acoth, asech, acsch,
+    exp, ln, 
+    diff, Derivative, integrate, 
+    fourier_transform, inverse_fourier_transform,
 )
-from scipy.io.wavfile import write
 from matplotlib.animation import FuncAnimation
 from IPython.display import HTML
 from functools import partial
-from scipy.io.wavfile import write
-from IPython.display import Audio
+from misc import * 
 
 plt.rcParams['text.usetex'] = False
 
@@ -62,7 +71,7 @@ class PDESolver:
     def __init__(self, equation, time_scheme='default', dealiasing_ratio=2/3):
         """
         Initialize the PDE solver with a given equation.
-
+    
         Args:
             equation (sympy.Eq): The PDE to solve.
             time_scheme (str): 'default' or 'ETD-RK4'
@@ -96,7 +105,7 @@ class PDESolver:
             self.y = None
         elif self.dim == 2:
             self.x, self.y = self.spatial_vars
-
+    
         self.fft_workers = 4
         
         if self.dim == 1:
@@ -112,16 +121,15 @@ class PDESolver:
         self.source_terms = []
         self.temporal_order = 0  # Order of the temporal derivative
         self.linear_terms, self.nonlinear_terms, self.symbol_terms, self.source_terms = self.parse_equation(equation)
-
+    
         if self.dim == 1:
             self.kx = symbols('kx')
         elif self.dim == 2:
             self.kx, self.ky = symbols('kx ky')
-
+    
         # Compute linear operator
         self.compute_linear_operator()
-
-        
+      
     def parse_equation(self, equation):
         """
         Parse the PDE to separate linear and nonlinear terms.
@@ -277,32 +285,16 @@ class PDESolver:
         print("\n--- Symbolic symbol analysis ---")
         symb_omega = 0
         symb_k = 0
-        symb_z = 0
         
         for coeff, symbol in self.symbol_terms:
             if symbol.has(omega):
                 # Ajouter directement les termes dépendant de omega
                 symb_omega += coeff * symbol
             elif any(symbol.has(k) for k in self.k_symbols):
-                # Détecter les termes monomiaux en kx ou ky avec un exposant positif
-                is_monomial = False
-                for k in self.k_symbols:
-                    if symbol.has(k):
-                        # Extraire la puissance de k dans le symbole
-                        power = symbol.as_coeff_exponent(k)[1]  # Récupère l'exposant de k
-                        if power.is_Integer and power > 0:  # Vérifie si l'exposant est un entier positif
-                            is_monomial = True
-                            break
-                
-                if is_monomial:
-                    # Substituer les symboles libres par les symboles de Fourier correspondants
-                    symb_k += coeff * symbol.subs(dict(zip(symbol.free_symbols, self.k_symbols)))
-                else:
-                   symb_z += coeff * symbol.subs(dict(zip(symbol.free_symbols, self.k_symbols)))
+                 symb_k += coeff * symbol.subs(dict(zip(symbol.free_symbols, self.k_symbols)))
 
         print(f"symb_omega: {symb_omega}")
         print(f"symb_k: {symb_k}")
-        print(f"symb_z: {symb_z}")
         
         equation = equation + symb_omega + symb_k         
 
@@ -333,8 +325,6 @@ class PDESolver:
         else:
             self.L_symbolic = -I * dispersion[0]
     
-        # --- Step 4: add Op(...) terms ---
-        self.L_symbolic = self.L_symbolic + symb_z
     
         self.L = lambdify(self.k_symbols, self.L_symbolic, "numpy")
     
@@ -453,25 +443,13 @@ class PDESolver:
         else:
             raise NotImplementedError("Only 1D and 2D problems are supported.")
 
-        print("\n*****************")
-        print("* CFL condition *")
-        print("*****************\n")
         self.check_cfl_condition()
 
-        print("\n********************")
-        print("* Symbol condition *")
-        print("********************\n")
         self.check_symbol_conditions()
 
-        print("\n*******************")
-        print("* Symbol plotting *")
-        print("*******************\n")
         self.plot_symbol()
 
         if self.temporal_order == 2:
-            print("\n*****************************")
-            print("* Wave propagation analysis *")
-            print("*****************************\n")
             self.analyze_wave_propagation()
             
     def apply_boundary(self, u):
@@ -735,6 +713,10 @@ class PDESolver:
         """
         Check the CFL condition based on group velocity for second-order PDEs.
         """
+        print("\n*****************")
+        print("* CFL condition *")
+        print("*****************\n")
+
         cfl_factor = 0.5  # Safety factor
         
         if self.dim == 1:
@@ -789,6 +771,11 @@ class PDESolver:
         """
         import numpy as np
         from sympy import lambdify, symbols
+
+        print("\n********************")
+        print("* Symbol condition *")
+        print("********************\n")
+
     
         if self.dim == 1:    
             if k_range is None:
@@ -859,6 +846,9 @@ class PDESolver:
         - Group velocity v_g(k) = ∇ₖ ω(k)
         - Anisotropy (in 2D)
         """
+        print("\n*****************************")
+        print("* Wave propagation analysis *")
+        print("*****************************\n")
         if not hasattr(self, 'omega_symbolic'):
             print("❌ omega_symbolic not defined. Only available for 2nd order in time.")
             return
@@ -944,8 +934,12 @@ class PDESolver:
             k_range: (kmin, kmax, N), optionnel
             cmap: colormap matplotlib (2D)
         """
-    
+        print("\n*******************")
+        print("* Symbol plotting *")
+        print("*******************\n")
+        
         assert component in ("abs", "re", "im"), "component must be 'abs', 're' or 'im'"
+        
     
         if self.dim == 1:
             if k_range is None:
@@ -1011,19 +1005,10 @@ class PDESolver:
     def animate(self, component='abs', overlay='contour'):
         """
         Create an animated plot of the solution evolution.
-        In 1D: line plot.
-        In 2D: surface plot with optional overlay.
-    
         Args:
             component (str): 'real', 'imag', 'abs', or 'angle'.
             overlay (str): Only used in 2D: 'contour' or 'front'.
         """
-        import matplotlib.pyplot as plt
-        from matplotlib.animation import FuncAnimation
-        import matplotlib.cm as cm
-        from scipy.ndimage import maximum_filter
-        import numpy as np
-    
         def get_component(u):
             if component == 'real':
                 return np.real(u)
@@ -1035,6 +1020,20 @@ class PDESolver:
                 return np.angle(u)
             else:
                 raise ValueError("Invalid component")
+
+        print("\n*********************")
+        print("* Solution plotting *")
+        print("*********************\n")
+        
+        # === Calculate time vector of stored frames ===
+        save_interval = max(1, self.Nt // self.n_frames)
+        frame_times = np.arange(0, self.Lt + self.dt, save_interval * self.dt)
+        
+        # === Target times for animation ===
+        target_times = np.linspace(0, self.Lt, self.n_frames)
+        
+        # Map target times to nearest frame indices
+        frame_indices = [np.argmin(np.abs(frame_times - t)) for t in target_times]
     
         if self.dim == 1:
             fig, ax = plt.subplots()
@@ -1045,18 +1044,20 @@ class PDESolver:
             ax.set_title('Initial condition')
             plt.tight_layout()
             plt.show()
-            
-            def update(i):
-                ydata = get_component(self.frames[i])
+    
+            def update(frame_number):
+                frame = frame_indices[frame_number]
+                ydata = get_component(self.frames[frame])
                 line.set_ydata(ydata)
                 ax.set_ylim(np.min(ydata), np.max(ydata))
-                ax.set_title(f't = {i * self.dt:.2f}')
+                current_time = target_times[frame_number]
+                ax.set_title(f't = {current_time:.2f}')
                 return line,
     
-            ani = FuncAnimation(fig, update, frames=len(self.frames), interval=50)
+            ani = FuncAnimation(fig, update, frames=len(target_times), interval=50)
             return ani
-        
-        else:
+    
+        else:  # dim == 2
             fig = plt.figure(figsize=(12, 6))
             ax = fig.add_subplot(111, projection='3d')
             ax.set_xlabel('x')
@@ -1069,39 +1070,26 @@ class PDESolver:
             plt.tight_layout()
             plt.show()
     
-            frame_indices = np.linspace(0, len(self.frames) - 1, min(self.n_frames, len(self.frames)), dtype=int)
-    
-            def update(frame_index):
-                frame = frame_indices[frame_index]
-                ax.clear()
+            def update(frame_number):
+                frame = frame_indices[frame_number]
                 current_data = get_component(self.frames[frame])
                 z_offset = np.max(current_data) + 0.05 * (np.max(current_data) - np.min(current_data))
     
+                ax.clear()
                 surf[0] = ax.plot_surface(self.X, self.Y, current_data,
                                           cmap='viridis', vmin=-1, vmax=1 if component != 'angle' else np.pi)
     
                 if overlay == 'contour':
                     ax.contour(self.X, self.Y, current_data, levels=10, cmap='cool', offset=z_offset)
-                elif overlay == 'front':
-                    dx = self.x_grid[1] - self.x_grid[0]
-                    dy = self.y_grid[1] - self.y_grid[0]
-                    du_dx, du_dy = np.gradient(current_data, dx, dy)
-                    grad_norm = np.sqrt(du_dx**2 + du_dy**2)
-                    local_max = (grad_norm == maximum_filter(grad_norm, size=5))
-                    normalized = grad_norm[local_max] / np.max(grad_norm)
-                    colors = cm.plasma(normalized)
-    
-                    ax.scatter(self.X[local_max], self.Y[local_max],
-                               z_offset * np.ones_like(self.X[local_max]),
-                               color=colors, s=10, alpha=0.8)
     
                 ax.set_xlabel('x')
                 ax.set_ylabel('y')
                 ax.set_zlabel(f'{component.title()} of u')
-                ax.set_title(f'Solution at t = {frame * self.dt:.2f}')
+                current_time = target_times[frame_number]
+                ax.set_title(f'Solution at t = {current_time:.2f}')
                 return surf
     
-            ani = FuncAnimation(fig, update, frames=len(frame_indices), interval=50)
+            ani = FuncAnimation(fig, update, frames=len(target_times), interval=50)
             return ani
 
     def compute_energy(self):
@@ -1147,7 +1135,6 @@ class PDESolver:
     
         return total_energy
 
-
     def plot_energy(self, log=False):
         """
         Plot the evolution of energy over time.
@@ -1182,7 +1169,6 @@ class PDESolver:
         plt.legend()
         plt.tight_layout()
         plt.show()
-
     
     def test(self, u_exact, t_eval=None, norm='relative', threshold=1e-2, plot=True, component='real'):
         """
