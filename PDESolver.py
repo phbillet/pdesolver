@@ -12,7 +12,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-
 import numpy as np
 import matplotlib.pyplot as plt
 from scipy.fft import fft2, ifft2, fft, ifft, fftfreq
@@ -44,6 +43,243 @@ class Op(Function):
     Usage: Op(symbol_expr, u)
     """
     nargs = 2
+
+
+class psiOp(Function):
+    """Symbolic wrapper for PseudoDifferentialOperator"""
+    nargs = 2   # (expr, u)
+
+class PseudoDifferentialOperator:
+    """
+    Pseudo-differential operator with dynamic symbol evaluation on spatial grids.
+    Supports both 1D and 2D operators, and can be defined explicitly (symbol mode)
+    or extracted automatically from symbolic equations (auto mode).
+
+    Parameters
+    ----------
+    expr : sympy expression
+        Symbolic expression representing the pseudo-differential symbol.
+    vars_x : list of sympy symbols
+        Spatial variables (e.g., [x] for 1D, [x, y] for 2D).
+    var_u : sympy function, optional
+        Function u(x, t) used in auto mode to extract the operator symbol.
+    mode : str, {'symbol', 'auto'}
+        - 'symbol': directly uses expr as the operator symbol.
+        - 'auto': computes the symbol automatically by applying expr to exp(i x xi).
+
+    Notes
+    -----
+    - Supports 1D and 2D operators.
+    - Uses numpy for numerical evaluation and scipy.fft for FFTs.
+
+    Examples
+    --------
+    >>> # Example 1: 1D Laplacian operator (symbol mode)
+    >>> from sympy import symbols
+    >>> x, xi = symbols('x xi', real=True)
+    >>> op = PseudoDifferentialOperator(expr=xi**2, vars_x=[x], mode='symbol')
+
+    >>> # Example 2: 1D transport operator (auto mode)
+    >>> from sympy import Function
+    >>> u = Function('u')
+    >>> expr = u(x).diff(x)
+    >>> op = PseudoDifferentialOperator(expr=expr, vars_x=[x], var_u=u(x), mode='auto')
+
+    """
+
+    def __init__(self, expr, vars_x, var_u=None, mode='symbol'):
+        self.dim = len(vars_x)
+        self.mode = mode
+        self.fft_workers = 4
+        self.symbol_cached = None
+        self.expr = expr
+
+        if self.dim == 1:
+            x, = vars_x
+            xi_internal = symbols('xi', real=True)
+            expr = expr.subs(symbols('xi', real=True), xi_internal)
+            self.fft = partial(fft, workers=self.fft_workers)
+            self.ifft = partial(ifft, workers=self.fft_workers)
+
+            if mode == 'symbol':
+                self.p_func = lambdify((x, xi_internal), expr, 'numpy')
+            elif mode == 'auto':
+                if var_u is None:
+                    raise ValueError("var_u must be provided in mode='auto'")
+                exp_i = exp(I * x * xi_internal)
+                P_ei = expr.subs(var_u, exp_i)
+                symbol = simplify(P_ei / exp_i)
+                self.p_func = lambdify((x, xi_internal), symbol, 'numpy')
+            else:
+                raise ValueError("mode must be 'auto' or 'symbol'")
+
+        elif self.dim == 2:
+            x, y = vars_x
+            xi_internal, eta_internal = symbols('xi eta', real=True)
+            expr = expr.subs(symbols('xi', real=True), xi_internal)
+            expr = expr.subs(symbols('eta', real=True), eta_internal)
+            self.fft = partial(fft2, workers=self.fft_workers)
+            self.ifft = partial(ifft2, workers=self.fft_workers)
+
+            if mode == 'symbol':
+                self.p_func = lambdify((x, y, xi_internal, eta_internal), expr, 'numpy')
+            elif mode == 'auto':
+                if var_u is None:
+                    raise ValueError("var_u must be provided in mode='auto'")
+                exp_i = exp(I * (x * xi_internal + y * eta_internal))
+                P_ei = expr.subs(var_u, exp_i)
+                symbol = simplify(P_ei / exp_i)
+                self.p_func = lambdify((x, y, xi_internal, eta_internal), symbol, 'numpy')
+            else:
+                raise ValueError("mode must be 'auto' or 'symbol'")
+
+        else:
+            raise NotImplementedError("Only 1D and 2D supported")
+
+        print("\nsymbol = ")
+        pprint(expr)
+
+    def evaluate(self, X, Y, KX, KY, cache=True):
+        if cache and self.symbol_cached is not None:
+            return self.symbol_cached
+
+        if self.dim == 1:
+            symbol = self.p_func(X, KX)
+        elif self.dim == 2:
+            symbol = self.p_func(X, Y, KX, KY)
+        else:
+            raise NotImplementedError("Only 1D and 2D supported")
+
+        if cache:
+            self.symbol_cached = symbol
+
+        return symbol
+
+    def clear_cache(self):
+        self.symbol_cached = None
+
+    def visualize_wavefront(self, x_grid, xi_grid, y_grid=None, eta_grid=None, xi0=0.0, eta0=0.0):
+        if self.dim == 1:
+            symbol_vals = self.p_func(x_grid[:, None], xi_grid[None, :])
+            plt.imshow(np.abs(symbol_vals), extent=[xi_grid.min(), xi_grid.max(), x_grid.min(), x_grid.max()], aspect='auto', origin='lower')
+            plt.colorbar(label='|Symbol|')
+            plt.xlabel('ξ (frequency)')
+            plt.ylabel('x (position)')
+            plt.title('Wavefront Set (|Symbol(x, ξ)|)')
+            plt.show()
+        elif self.dim == 2:
+            X, Y = np.meshgrid(x_grid, y_grid, indexing='ij')
+            XI = np.full_like(X, xi0)
+            ETA = np.full_like(Y, eta0)
+            symbol_vals = self.p_func(X, Y, XI, ETA)
+            plt.imshow(np.abs(symbol_vals), extent=[x_grid.min(), x_grid.max(), y_grid.min(), y_grid.max()],aspect='auto', origin='lower')
+            plt.colorbar(label='|Symbol|')
+            plt.xlabel('x')
+            plt.ylabel('y')
+            plt.title(f'Wavefront Set at ξ={xi0}, η={eta0}')
+            plt.show()
+
+    def visualize_fiber(self, x_grid, xi_grid, y0=0.0, x0=0.0):
+        if self.dim == 1:
+            X, XI = np.meshgrid(x_grid, xi_grid, indexing='ij')
+            symbol_vals = self.p_func(X, XI)
+            plt.contourf(X, XI, np.abs(symbol_vals), levels=50, cmap='viridis')
+            plt.colorbar(label='|Symbol|')
+            plt.xlabel('x (position)')
+            plt.ylabel('ξ (frequency)')
+            plt.title('Cotangent Fiber Structure')
+            plt.show()
+        elif self.dim == 2:
+            xi_grid2, eta_grid2 = np.meshgrid(xi_grid, xi_grid)
+            symbol_vals = self.p_func(x0, y0, xi_grid2, eta_grid2)
+            plt.contourf(xi_grid, xi_grid, np.abs(symbol_vals), levels=50, cmap='viridis')
+            plt.colorbar(label='|Symbol|')
+            plt.xlabel('ξ')
+            plt.ylabel('η')
+            plt.title(f'Cotangent Fiber at x={x0}, y={y0}')
+            plt.show()
+
+    def visualize_symbol_amplitude(self, x_grid, xi_grid, y_grid=None, eta_grid=None, xi0=0.0, eta0=0.0):
+        if self.dim == 1:
+            X, XI = np.meshgrid(x_grid, xi_grid, indexing='ij')
+            symbol_vals = self.p_func(X, XI) 
+            plt.pcolormesh(X, XI, np.abs(symbol_vals), shading='auto')
+            plt.colorbar(label='|Symbol|')
+            plt.xlabel('x')
+            plt.ylabel('ξ')
+            plt.title('Symbol Amplitude |p(x, ξ)|')
+            plt.show()
+        elif self.dim == 2:
+            X, Y = np.meshgrid(x_grid, y_grid, indexing='ij')
+            XI = np.full_like(X, xi0)
+            ETA = np.full_like(Y, eta0)
+            symbol_vals = self.p_func(X, Y, XI, ETA)
+            plt.pcolormesh(X, Y, np.abs(symbol_vals), shading='auto')
+            plt.colorbar(label='|Symbol|')
+            plt.xlabel('x')
+            plt.ylabel('y')
+            plt.title(f'Symbol Amplitude at ξ={xi0}, η={eta0}')
+            plt.show()
+
+    def visualize_phase(self, x_grid, xi_grid, y_grid=None, eta_grid=None, xi0=0.0, eta0=0.0):
+        if self.dim == 1:
+            X, XI = np.meshgrid(x_grid, xi_grid, indexing='ij')
+            symbol_vals = self.p_func(X, XI) 
+            plt.pcolormesh(X, XI, np.angle(symbol_vals), shading='auto', cmap='twilight')
+            plt.colorbar(label='arg(Symbol) [rad]')
+            plt.xlabel('x')
+            plt.ylabel('ξ')
+            plt.title('Phase Portrait (arg p(x, ξ))')
+            plt.show()
+        elif self.dim == 2:
+            X, Y = np.meshgrid(x_grid, y_grid, indexing='ij')
+            XI = np.full_like(X, xi0)
+            ETA = np.full_like(Y, eta0)
+            symbol_vals = self.p_func(X, Y, XI, ETA)
+            plt.pcolormesh(X, Y, np.angle(symbol_vals), shading='auto', cmap='twilight')
+            plt.colorbar(label='arg(Symbol) [rad]')
+            plt.xlabel('x')
+            plt.ylabel('y')
+            plt.title(f'Phase Portrait at ξ={xi0}, η={eta0}')
+            plt.show()
+
+    def visualize_characteristic_set(self, x_grid, xi_grid, y0=0.0, x0=0.0):
+        if self.dim == 1:
+            X, XI = np.meshgrid(x_grid, xi_grid, indexing='ij')
+            symbol_vals = self.p_func(X, XI) 
+            plt.contour(X, XI, np.abs(symbol_vals), levels=[1e-5], colors='red')
+            plt.xlabel('x')
+            plt.ylabel('ξ')
+            plt.title('Characteristic Set (p(x, ξ) ≈ 0)')
+            plt.show()
+        elif self.dim == 2:
+            xi_grid2, eta_grid2 = np.meshgrid(xi_grid, xi_grid)
+            symbol_vals = self.p_func(x0, y0, xi_grid2, eta_grid2)
+            plt.contour(xi_grid, xi_grid, np.abs(symbol_vals), levels=[1e-5], colors='red')
+            plt.xlabel('ξ')
+            plt.ylabel('η')
+            plt.title(f'Characteristic Set at x={x0}, y={y0}')
+            plt.show()
+
+    def visualize_dynamic_wavefront(self, x_grid, t_grid, y_grid=None, xi0=5.0, eta0=0.0):
+        if self.dim == 1:
+            X, T = np.meshgrid(x_grid, t_grid)
+            U = np.cos(xi0 * X - xi0 * T)
+            plt.imshow(U, extent=[t_grid.min(), t_grid.max(), x_grid.min(), x_grid.max()], aspect='auto', origin='lower', cmap='seismic')
+            plt.colorbar(label='u(x, t)')
+            plt.xlabel('t (time)')
+            plt.ylabel('x (position)')
+            plt.title('Dynamic Wavefront u(x, t)')
+            plt.show()
+        elif self.dim == 2:
+            X, Y = np.meshgrid(x_grid, y_grid)
+            U = np.cos(xi0 * X + eta0 * Y - np.sqrt(xi0**2 + eta0**2) * t_grid[0])
+            plt.imshow(U, extent=[x_grid.min(), x_grid.max(), y_grid.min(), y_grid.max()], aspect='auto', origin='lower', cmap='seismic')
+            plt.colorbar(label='u(x, y)')
+            plt.xlabel('x')
+            plt.ylabel('y')
+            plt.title(f'Dynamic Wavefront at t={t_grid[0]}')
+            plt.show()
 
 class PDESolver:
     """
@@ -119,8 +355,13 @@ class PDESolver:
         self.nonlinear_terms = []
         self.symbol_terms = []
         self.source_terms = []
+        self.pseudo_terms = []
         self.temporal_order = 0  # Order of the temporal derivative
-        self.linear_terms, self.nonlinear_terms, self.symbol_terms, self.source_terms = self.parse_equation(equation)
+        self.linear_terms, self.nonlinear_terms, self.symbol_terms, self.source_terms, self.pseudo_terms = self.parse_equation(equation)
+        # flag : pseudo‑differential operator present ?
+        self.has_psi = bool(self.pseudo_terms)
+        if self.has_psi:
+            print("⚠️  Pseudo‑differential operator detected: all other linear terms have been rejected.")
     
         if self.dim == 1:
             self.kx = symbols('kx')
@@ -129,88 +370,76 @@ class PDESolver:
     
         # Compute linear operator
         self.compute_linear_operator()
-      
+
     def parse_equation(self, equation):
         """
         Parse the PDE to separate linear and nonlinear terms.
         Args:
             equation (sympy.Eq): Partial Differential Equation to parse.
         Returns:
-            tuple: Dictionary of linear terms, list of nonlinear terms, list of extra symbolic terms with coefficients,
-                   and list of source terms.
+            tuple: Dictionary of linear terms, list of nonlinear terms, list of symbolic operator terms (Op),
+                   list of source terms, and list of pseudo-differential operator terms (psiOp).
         """
         def is_nonlinear_term(term, u_func):
-            """Determine if a term should be considered nonlinear."""
-            # If term involves u inside a nontrivial function (like sin(u))
             if any(arg.has(u_func) for arg in term.args if isinstance(arg, Function) and arg.func != u_func.func):
                 return True
-            
-            # If term involves u to a nontrivial power
             if any(isinstance(arg, Pow) and arg.base == u_func and (arg.exp != 1) for arg in term.args):
                 return True
-            
-            # If product of u and derivatives
             if term.func == Mul:
                 factors = term.args
                 has_u = any(f == u_func for f in factors)
                 has_derivative = any(isinstance(f, Derivative) and f.expr.func == u_func.func for f in factors)
                 if has_u and has_derivative:
                     return True
-            
-            # If the term is sin(u), cos(u), exp(u), etc. directly
             if term.has(u_func) and isinstance(term, Function) and term.func != u_func.func:
                 return True
-        
             return False
-
+    
         print("\n********************")
         print("* Equation parsing *")
         print("********************\n")
-        # Rewrite the equation in standard form: LHS - RHS = 0
+    
         if isinstance(equation, Eq):
             lhs = equation.lhs - equation.rhs
         else:
             lhs = equation
-        
+    
         print(f"\nEquation rewritten in standard form: {lhs}")
-        # Expand the equation
         lhs_expanded = expand(lhs)
         print(f"\nExpanded equation: {lhs_expanded}")
+    
         linear_terms = {}
         nonlinear_terms = []
         symbol_terms = []
-        source_terms = []  # Nouvelle liste pour les termes sources
-        # Extract custom Op() symbols from RHS (before any classification)
-        for expr in lhs.atoms(Op):
-            print("expr : ", expr)
-            full_term = [term for term in lhs.as_ordered_terms() if expr in term.args or term == expr]
-            print("full_term : ", full_term)
-            if full_term:
-                coeff = full_term[0].as_coeff_mul()[0]
-                symbol_expr = expr.args[0]
-                symbol_terms.append((coeff, symbol_expr))
-                
-        # Parse terms, excluding Op(...) from classification
+        source_terms = []
+        pseudo_terms = []
+    
         for term in lhs_expanded.as_ordered_terms():
             print(f"Analyzing term: {term}")
-        
-            if isinstance(term, Op):
-                # Directly a symbolic operator: linear
-                coeff = term.as_coeff_mul()[0]
-                symbol_expr = term.args[0]
-                self.symbol_terms.append((coeff, symbol_expr))
-                print("  --> Classified as symbolic linear term (Op)")
+    
+            if term.has(psiOp):
+                psiops = term.atoms(psiOp)
+                for psi in psiops:
+                    coeff = term / psi
+                    expr = psi.args[0]
+                    pseudo_terms.append((coeff, expr))
+                    print("  --> Classified as pseudo linear term (psiOp)")
                 continue
-        
+    
             if term.has(Op):
-                print("  --> Detected symbolic operator term (Op), excluded from classification.")
+                ops = term.atoms(Op)
+                for op in ops:
+                    coeff = term / op
+                    expr = op.args[0]
+                    symbol_terms.append((coeff, expr))
+                    print("  --> Classified as symbolic linear term (Op)")
                 continue
-        
+    
             if is_nonlinear_term(term, self.u):
                 nonlinear_terms.append(term)
                 print("  --> Classified as nonlinear")
                 continue
-        
+    
             derivs = term.atoms(Derivative)
             if derivs:
                 deriv = derivs.pop()
@@ -225,12 +454,26 @@ class PDESolver:
             else:
                 source_terms.append(term)
                 print("  --> Classified as source term")
-
+    
         print(f"Final linear terms: {linear_terms}")
         print(f"Final nonlinear terms: {nonlinear_terms}")
         print(f"Symbol terms: {symbol_terms}")
+        print(f"Pseudo terms: {pseudo_terms}")
         print(f"Source terms: {source_terms}")
-        return linear_terms, nonlinear_terms, symbol_terms, source_terms        
+    
+        if pseudo_terms:
+            time_terms = {term: coeff for term, coeff in linear_terms.items()
+                          if any(isinstance(arg, Derivative) or 'Derivative' in repr(term) for arg in [term])}
+            other_linear = {t: c for t, c in linear_terms.items() if t not in time_terms}
+            print("other_linear =", other_linear)
+            print("symbol_terms =", symbol_terms)
+    
+            if other_linear or symbol_terms:
+                raise ValueError(
+                    "When using psiOp, only the time derivative term and the non-linear and source terms are permitted alongside the pseudo operator."
+                )
+    
+        return linear_terms, nonlinear_terms, symbol_terms, source_terms, pseudo_terms
 
     def compute_linear_operator(self):
         """
@@ -309,88 +552,87 @@ class PDESolver:
         except:
             self.temporal_order = 0
         print(f"Temporal order from dispersion relation: {self.temporal_order}")
-
-        dispersion = solve(Eq(equation, 0), omega)
-        
-        if not dispersion:
-            raise ValueError("No solution found for omega")
-        print("\n--- Solutions found ---")
-        pprint(dispersion)
-    
-        if self.temporal_order == 2:
-            omega_expr = simplify(sqrt(dispersion[0]**2))
-            self.omega_symbolic = omega_expr
-            self.omega = lambdify(self.k_symbols, omega_expr, "numpy")
-            self.L_symbolic = -omega_expr**2
+        print('self.pseudo_terms = ', self.pseudo_terms)
+        if self.pseudo_terms:
+            # on détecte l’ordre temporel comme avant
+            # puis on instancie pour chaque terme :
+            self.psi_ops = []
+            for coeff, sym_expr in self.pseudo_terms:
+                # expr est le Sympy expr. différentiel, var_x la liste [x] ou [x,y]
+                psi = PseudoDifferentialOperator(sym_expr, self.spatial_vars, self.u, mode='symbol')
+                
+                self.psi_ops.append((coeff, psi))
         else:
-            self.L_symbolic = -I * dispersion[0]
-    
-    
-        self.L = lambdify(self.k_symbols, self.L_symbolic, "numpy")
-    
-        print("\n--- Final linear operator ---")
-        pprint(self.L_symbolic)   
+            dispersion = solve(Eq(equation, 0), omega)
+            if not dispersion:
+                raise ValueError("No solution found for omega")
+            print("\n--- Solutions found ---")
+            pprint(dispersion)
+        
+            if self.temporal_order == 2:
+                omega_expr = simplify(sqrt(dispersion[0]**2))
+                self.omega_symbolic = omega_expr
+                self.omega = lambdify(self.k_symbols, omega_expr, "numpy")
+                self.L_symbolic = -omega_expr**2
+            else:
+                self.L_symbolic = -I * dispersion[0]
+        
+        
+            self.L = lambdify(self.k_symbols, self.L_symbolic, "numpy")
+  
+            print("\n--- Final linear operator ---")
+            pprint(self.L_symbolic)   
 
-    def setup(self, Lx, Ly=None, Nx=None, Ny=None, Lt=1.0, Nt=100, initial_condition=None, initial_velocity=None, n_frames=100):
+    def linear_rhs(self, u, is_v=False):
+        """
+        Apply the linear operator (in Fourier space) to the field u or v.
+        Used to compute initial acceleration when no psiOp is used.
+        """
+        if self.dim == 1:
+            self.symbol_u = np.array(self.L(self.KX), dtype=np.complex128)
+            self.symbol_v = self.symbol_u  # même opérateur pour u et v
+        elif self.dim == 2:
+            self.symbol_u = np.array(self.L(self.KX, self.KY), dtype=np.complex128)
+            self.symbol_v = self.symbol_u
+        u_hat = self.fft(u)
+        u_hat *= self.symbol_v if is_v else self.symbol_u
+        u_hat *= self.dealiasing_mask
+        return self.ifft(u_hat)
+
+
+    def setup(self, Lx, Ly=None, Nx=None, Ny=None, Lt=1.0, Nt=100,
+              initial_condition=None, initial_velocity=None, n_frames=100):
         """
         Set up the computational grid, initial conditions, and (optionally) the curvilinear domain.
-        Args:
-            Lx (float): Domain length in the x-direction (for the enclosing rectangle).
-            Ly (float): Domain length in the y-direction (for the enclosing rectangle).
-            Nx (int): Number of grid points in the x-direction.
-            Ny (int): Number of grid points in the y-direction.
-            Lt (float): Total simulation time.
-            Nt (int): Number of time steps.
-            initial_condition (callable): Function generating the initial condition for u.
-            initial_velocity (callable, optional): Function generating the initial condition for v (if temporal_order == 2).
-            n_frames (int): Number of pictures in the animation
         """
+
+        # time stepping parameters
         self.Lt, self.Nt = Lt, Nt
         self.dt = Lt / Nt
         self.n_frames = n_frames
+        self.frames = []
 
+        # check spatial dimension requirements
         if self.dim == 1:
             if Nx is None:
                 raise ValueError("Nx must be specified in 1D.")
         else:
             if None in (Ly, Ny):
                 raise ValueError("Both Ly and Ny must be specified in 2D.")
-    
+
+        # 1D grid
         if self.dim == 1:
-            self.Lx = Lx
-            self.Nx = Nx
-    
-            # Spatial grid and frequencies
+            self.Lx, self.Nx = Lx, Nx
             self.x_grid = np.linspace(-Lx/2, Lx/2, Nx, endpoint=False)
             self.X = self.x_grid
             self.kx = 2 * np.pi * fftfreq(Nx, d=Lx / Nx)
             self.KX = self.kx
-    
-            # Dealiasing mask
-            k_max_x = self.dealiasing_ratio * np.max(np.abs(self.kx))
-            self.dealiasing_mask = (np.abs(self.KX) <= k_max_x)
-    
-            # Exponential operator
-            L_values = np.array(self.L(self.KX), dtype=np.complex128) 
-            self.exp_L = np.exp(L_values * self.dt)
-    
-            # Initial condition
-            self.u_prev = initial_condition(self.X)
-    
-            # Apply boundary condition
-            self.apply_boundary(self.u_prev)
-    
-            if self.temporal_order == 2:
-                if initial_velocity is None:
-                    raise ValueError("Initial velocity must be provided for second-order temporal derivatives")
-                self.v_prev = initial_velocity(self.X)
-                self.apply_boundary(self.v_prev)
-            else:
-                self.v_prev = None
-    
-            self.frames = [self.u_prev.copy()]
-    
-            if self.temporal_order == 2:
+
+            # dealiasing
+            k_max = self.dealiasing_ratio * np.max(np.abs(self.kx))
+            self.dealiasing_mask = (np.abs(self.KX) <= k_max)
+
+            if self.temporal_order == 2 and not self.has_psi:
                 omega_val = self.omega(self.KX)
                 self.omega_val = omega_val
                 self.cos_omega_dt = np.cos(omega_val * self.dt)
@@ -399,39 +641,36 @@ class PDESolver:
                 nonzero = omega_val != 0
                 self.inv_omega[nonzero] = 1.0 / omega_val[nonzero]
 
-        elif self.dim == 2:
+            self.u_prev = initial_condition(self.X)
+
+            if self.has_psi:
+                self.prepare_symbol_tables()
+            
+            if self.temporal_order == 2:
+                self.v_prev = initial_velocity(self.X) if initial_velocity is not None else np.zeros_like(self.X)
+            
+                if self.has_psi:
+                    acc0 = self.psiOp_fast(self.u_prev)
+                else:
+                    acc0 = self.linear_rhs(self.u_prev, is_v=False)
+            
+                self.u_prev2 = self.u_prev + self.dt * self.v_prev + 0.5 * self.dt**2 * acc0
+
+        # 2D grid
+        else:
             self.Lx, self.Ly = Lx, Ly
             self.Nx, self.Ny = Nx, Ny
-
             self.x_grid = np.linspace(-Lx/2, Lx/2, Nx, endpoint=False)
             self.y_grid = np.linspace(-Ly/2, Ly/2, Ny, endpoint=False)
             self.X, self.Y = np.meshgrid(self.x_grid, self.y_grid, indexing='ij')
-    
             self.kx = 2 * np.pi * fftfreq(Nx, d=Lx / Nx)
             self.ky = 2 * np.pi * fftfreq(Ny, d=Ly / Ny)
             self.KX, self.KY = np.meshgrid(self.kx, self.ky, indexing='ij')
-    
-            k_max_x = self.dealiasing_ratio * np.max(np.abs(self.kx))
-            k_max_y = self.dealiasing_ratio * np.max(np.abs(self.ky))
-            self.dealiasing_mask = (np.abs(self.KX) <= k_max_x) & (np.abs(self.KY) <= k_max_y)
-    
-            self.exp_L = np.exp(self.L(self.KX, self.KY) * self.dt)
-    
-            self.u_prev = initial_condition(self.X, self.Y)
-    
-            self.apply_boundary(self.u_prev)
-    
-            if self.temporal_order == 2:
-                if initial_velocity is None:
-                    raise ValueError("Initial velocity must be provided for second-order temporal derivatives")
-                self.v_prev = initial_velocity(self.X, self.Y)
-                self.apply_boundary(self.v_prev)
-            else:
-                self.v_prev = None
-    
-            self.frames = [self.u_prev.copy()]
-    
-            if self.temporal_order == 2:
+            kx_max = self.dealiasing_ratio * np.max(np.abs(self.kx))
+            ky_max = self.dealiasing_ratio * np.max(np.abs(self.ky))
+            self.dealiasing_mask = (np.abs(self.KX) <= kx_max) & (np.abs(self.KY) <= ky_max)
+
+            if self.temporal_order == 2 and not self.has_psi:
                 omega_val = self.omega(self.KX, self.KY)
                 self.omega_val = omega_val
                 self.cos_omega_dt = np.cos(omega_val * self.dt)
@@ -439,18 +678,107 @@ class PDESolver:
                 self.inv_omega = np.zeros_like(omega_val)
                 nonzero = omega_val != 0
                 self.inv_omega[nonzero] = 1.0 / omega_val[nonzero]
-    
+
+        # If no psiOp, compute linear operator L and its exponential
+        if not self.has_psi:
+            if self.dim == 1:
+                L_vals = np.array(self.L(self.KX), dtype=np.complex128)
+                self.exp_L = np.exp(L_vals * self.dt)
+            else:
+                L_vals = self.L(self.KX, self.KY)
+                self.exp_L = np.exp(L_vals * self.dt)
+
+        # initial condition for u
+        if self.dim == 1:
+            self.u_prev = initial_condition(self.X)
         else:
-            raise NotImplementedError("Only 1D and 2D problems are supported.")
+            self.u_prev = initial_condition(self.X, self.Y)
+        self.apply_boundary(self.u_prev)
 
-        self.check_cfl_condition()
+        # for second order in time, set initial velocity v_prev
+        if self.temporal_order == 2:
+            if initial_velocity is None:
+                raise ValueError("Initial velocity must be provided for second-order temporal derivatives")
+            if self.dim == 1:
+                self.v_prev = initial_velocity(self.X)
+            else:
+                self.v_prev = initial_velocity(self.X, self.Y)
 
-        self.check_symbol_conditions()
-
-        self.plot_symbol()
+        if self.has_psi:
+            self.prepare_symbol_tables()
 
         if self.temporal_order == 2:
-            self.analyze_wave_propagation()
+            if not hasattr(self, 'u_prev2'):
+                # Compute initial acceleration a0 = L[u0] + nonlinear + source
+                if self.has_psi:
+                    acc0 = self.psiOp_fast(self.u_prev)
+                else:
+                    acc0 = self.linear_rhs(self.u_prev, is_v=False)
+        
+                rhs_nl = self.apply_nonlinear(self.u_prev, is_v=False)
+                acc0 += rhs_nl
+        
+                if hasattr(self, 'source_terms') and self.source_terms:
+                    # Evaluate source at t=0 similarly
+                    source_contribution = 0  # (Add source evaluation here if needed)
+                    acc0 += source_contribution
+        
+                # Initialize u_prev2 by Taylor expansion
+                self.u_prev2 = self.u_prev + self.dt * self.v_prev + 0.5 * self.dt**2 * acc0
+
+        self.frames = [self.u_prev.copy()]
+        
+        if self.has_psi:
+            self.visualize_total_psi_symbol()
+        else:
+            self.check_cfl_condition()
+    
+            self.check_symbol_conditions()
+    
+            self.plot_symbol()
+    
+            if self.temporal_order == 2:
+                self.analyze_wave_propagation()
+
+    def visualize_total_psi_symbol(self, xi0=1.0, eta0=0.0):
+        if not self.has_psi or not hasattr(self, 'psi_ops'):
+            print("No pseudo-differential operator detected.")
+            return
+    
+        # Créer un opérateur factice avec la somme des symboles
+        from sympy import symbols
+        x = self.spatial_vars[0]
+        y = self.spatial_vars[1] if self.dim == 2 else None
+        xi = symbols('xi', real=True)
+        eta = symbols('eta', real=True) if self.dim == 2 else None
+    
+        total_expr = 0
+        for coeff, psi in self.psi_ops:
+            total_expr += coeff * psi.expr  # Accumule l'expression du symbole
+    
+        if self.dim == 1:
+            fused = PseudoDifferentialOperator(total_expr, [x], mode='symbol')
+            xg = self.X
+            kg = self.KX
+            fused.visualize_wavefront(xg, kg)
+            fused.visualize_fiber(xg, kg)
+            fused.visualize_symbol_amplitude(xg, kg)
+            fused.visualize_phase(xg, kg)
+            fused.visualize_characteristic_set(xg, kg)
+            fused.visualize_dynamic_wavefront(xg, np.linspace(0, self.Lt, 100), xi0=xi0)
+    
+        elif self.dim == 2:
+            fused = PseudoDifferentialOperator(total_expr, [x, y], mode='symbol')
+            xg = self.x_grid
+            yg = self.y_grid
+            kx = self.kx
+            fused.visualize_wavefront(xg, kx, yg, self.ky, xi0=xi0, eta0=eta0)
+            fused.visualize_fiber(xg, kx, x0=0.0, y0=0.0)
+            fused.visualize_symbol_amplitude(xg, kx, yg, self.ky, xi0=xi0, eta0=eta0)
+            fused.visualize_phase(xg, kx, yg, self.ky, xi0=xi0, eta0=eta0)
+            fused.visualize_characteristic_set(xg, kx, x0=0.0, y0=0.0)
+            fused.visualize_dynamic_wavefront(xg, np.linspace(0, self.Lt, 100), yg, xi0=xi0, eta0=eta0)
+
             
     def apply_boundary(self, u):
         """Apply boundary conditions for a rectangular domain."""
@@ -525,6 +853,44 @@ class PDESolver:
         
         return nonlinear_term * self.dt
 
+    def prepare_symbol_tables(self):
+        """Precompute all psiOp symbols as arrays (real or complex)."""
+        self.precomputed_symbols = []
+        for coeff, psi in self.psi_ops:
+            # Evaluate the symbol (can be 1D or 2D)
+            if self.dim == 1:
+                raw = psi.evaluate(self.X, None, self.KX, None)
+            elif self.dim == 2:
+                raw = psi.evaluate(self.X, self.Y, self.KX, self.KY)
+            else:
+                raise ValueError("Unsupported spatial dimension.")
+    
+            # Robust conversion: handle both 1D and 2D arrays
+            raw_flat = raw.flatten()
+            converted = np.array([complex(N(val)) for val in raw_flat], dtype=np.complex128)
+            raw_eval = converted.reshape(raw.shape)
+    
+            self.precomputed_symbols.append((coeff, raw_eval))
+
+    def psiOp_fast(self, u):
+        u_hat = self.fft(u)
+        combined_symbol = np.zeros_like(u_hat, dtype=np.complex128)
+    
+        for coeff, precomputed_symbol in self.precomputed_symbols:
+            # Convert coeff to complex128 if not already
+            coeff = np.complex128(coeff)
+    
+            # Ensure symbol is complex128
+            symbol = np.array(precomputed_symbol, dtype=np.complex128)
+    
+            combined_symbol += coeff * symbol
+    
+        # Spectral update
+        u_hat *= np.exp(-self.dt * combined_symbol)
+        u_hat *= self.dealiasing_mask
+    
+        return self.ifft(u_hat)
+
     def solve(self):
         """
         Solve the PDE with the chosen time integration scheme.
@@ -539,9 +905,9 @@ class PDESolver:
         
         save_interval = max(1, self.Nt // self.n_frames)
         self.energy_history = []
-        
+    
         for step in range(self.Nt):
-            # Source term evaluation
+            # Evaluate source term
             if hasattr(self, 'source_terms') and self.source_terms:
                 source_contribution = np.zeros_like(self.X, dtype=np.float64)
                 for term in self.source_terms:
@@ -557,54 +923,87 @@ class PDESolver:
             else:
                 source_contribution = 0
     
+            # First-order in time
             if self.temporal_order == 1:
-                if hasattr(self, 'time_scheme') and self.time_scheme == 'ETD-RK4':
-                    u_new = self.step_ETD_RK4(self.u_prev)
+                if self.has_psi:
+                    u_sym = self.psiOp_fast(self.u_prev)
+                    u_nl = self.apply_nonlinear(u_sym)
+                    u_new = u_sym + u_nl
                 else:
-                    u_hat = self.fft(self.u_prev)
-                    u_hat *= self.exp_L
-                    u_hat *= self.dealiasing_mask
-                    u_lin = self.ifft(u_hat)
-                    u_nl = self.apply_nonlinear(u_lin)
-                    u_new = u_lin + u_nl
+                    if hasattr(self, 'time_scheme') and self.time_scheme == 'ETD-RK4':
+                        u_new = self.step_ETD_RK4(self.u_prev)
+                    else:
+                        u_hat = self.fft(self.u_prev)
+                        u_hat *= self.exp_L
+                        u_hat *= self.dealiasing_mask
+                        u_lin = self.ifft(u_hat)
+                        u_nl = self.apply_nonlinear(u_lin)
+                        u_new = u_lin + u_nl
     
                 u_new = u_new + source_contribution
                 self.apply_boundary(u_new)
                 self.u_prev = u_new
     
+            # Second-order in time
             elif self.temporal_order == 2:
-                if hasattr(self, 'time_scheme') and self.time_scheme == 'ETD-RK4':
-                    u_new, v_new = self.step_ETD_RK4_order2(self.u_prev, self.v_prev)
-                else:
-                    # Linear evolution
+                if self.has_psi:
+                    # === LEAP-FROG (explicit 2nd-order centered scheme) ===
+            
+                    # Compute spectral multiplier symbol_vals on first call
+                    if step == 0:
+                        self.symbol_vals = self.compute_combined_symbol()
+            
+                    # 1. FFT of u_prev (u^n)
                     u_hat = self.fft(self.u_prev)
-                    v_hat = self.fft(self.v_prev)
+            
+                    # 2. Apply spectral operator
+                    Lu_hat = -self.symbol_vals * u_hat
+                    Lu_prev = self.ifft(Lu_hat)
+            
+                    # 3. Leap-Frog update: u^{n+1} = 2u^n - u^{n-1} + dt² L(u^n)
+                    u_new = 2 * self.u_prev - self.u_prev2 + self.dt**2 * Lu_prev
+            
+                    # 4. Add optional nonlinear and source terms
+                    rhs_nl = self.apply_nonlinear(self.u_prev, is_v=False)
+                    u_new += self.dt**2 * (rhs_nl + source_contribution)
+            
+                    # 5. Enforce boundary conditions and update
+                    self.apply_boundary(u_new)
+                    self.u_prev2 = self.u_prev
+                    self.u_prev = u_new
+
+                else:
+                    if hasattr(self, 'time_scheme') and self.time_scheme == 'ETD-RK4':
+                        u_new, v_new = self.step_ETD_RK4_order2(self.u_prev, self.v_prev)
+                    else:
+                        u_hat = self.fft(self.u_prev)
+                        v_hat = self.fft(self.v_prev)
     
-                    u_new_hat = (self.cos_omega_dt * u_hat +
-                                 self.sin_omega_dt * self.inv_omega * v_hat)
-                    v_new_hat = (-self.omega_val * self.sin_omega_dt * u_hat +
-                                  self.cos_omega_dt * v_hat)
+                        u_new_hat = (self.cos_omega_dt * u_hat +
+                                     self.sin_omega_dt * self.inv_omega * v_hat)
+                        v_new_hat = (-self.omega_val * self.sin_omega_dt * u_hat +
+                                      self.cos_omega_dt * v_hat)
     
-                    u_new = self.ifft(u_new_hat)
-                    v_new = self.ifft(v_new_hat)
+                        u_new = self.ifft(u_new_hat)
+                        v_new = self.ifft(v_new_hat)
     
-                    # Nonlinear + source contributions (add on acceleration)
-                    u_nl = self.apply_nonlinear(self.u_prev, is_v=False)
-                    v_nl = self.apply_nonlinear(self.v_prev, is_v=True)
+                        u_nl = self.apply_nonlinear(self.u_prev, is_v=False)
+                        v_nl = self.apply_nonlinear(self.v_prev, is_v=True)
     
-                    u_new += (u_nl + source_contribution) * (self.dt**2) / 2
-                    v_new += (u_nl + source_contribution) * self.dt
+                        u_new += (u_nl + source_contribution) * (self.dt**2) / 2
+                        v_new += (u_nl + source_contribution) * self.dt
     
-                self.apply_boundary(u_new)
-                self.apply_boundary(v_new)
-                self.u_prev = u_new
-                self.v_prev = v_new
+                    self.apply_boundary(u_new)
+                    self.apply_boundary(v_new)
+                    self.u_prev = u_new
+                    self.v_prev = v_new
     
-            # Save frames
+            # Save current state
             if step % save_interval == 0:
                 self.frames.append(self.u_prev.copy())
     
-            if self.temporal_order == 2:
+            # Energy monitoring only in linear case without psiOp
+            if self.temporal_order == 2 and not self.has_psi:
                 E = self.compute_energy()
                 self.energy_history.append(E)
 
@@ -708,6 +1107,36 @@ class PDESolver:
         v_new = v + (dt / 6.0) * (A + 2*B + 2*C + D)
     
         return u_new, v_new
+
+    def compute_combined_symbol(self):
+        """
+        Evaluates the weighted sum of pseudo-differential symbols on the grid.
+        Returns a numpy array (complex128) of the same shape as the spectral grid.
+        """
+        from sympy import N
+    
+        if not hasattr(self, 'psi_ops'):
+            raise AttributeError("psi_ops not defined")
+    
+        shape = self.KX.shape if self.dim == 2 else self.KX.shape
+        symbol_vals = np.zeros(shape, dtype=np.complex128)
+    
+        for coeff_sym, psi in self.psi_ops:
+            coeff = complex(N(coeff_sym))
+            raw = psi.evaluate(
+                self.X,
+                self.Y if self.dim == 2 else None,
+                self.KX,
+                self.KY if self.dim == 2 else None
+            )
+    
+            flat = list(raw.flat)
+            values = [complex(N(v)) for v in flat]
+            sym_np = np.array(values, dtype=np.complex128).reshape(raw.shape)
+    
+            symbol_vals += coeff * sym_np
+    
+        return symbol_vals
 
     def check_cfl_condition(self):
         """
@@ -1001,96 +1430,6 @@ class PDESolver:
     
         else:
             raise ValueError("Only 1D and 2D supported.")
-    
-    def animate(self, component='abs', overlay='contour'):
-        """
-        Create an animated plot of the solution evolution.
-        Args:
-            component (str): 'real', 'imag', 'abs', or 'angle'.
-            overlay (str): Only used in 2D: 'contour' or 'front'.
-        """
-        def get_component(u):
-            if component == 'real':
-                return np.real(u)
-            elif component == 'imag':
-                return np.imag(u)
-            elif component == 'abs':
-                return np.abs(u)
-            elif component == 'angle':
-                return np.angle(u)
-            else:
-                raise ValueError("Invalid component")
-
-        print("\n*********************")
-        print("* Solution plotting *")
-        print("*********************\n")
-        
-        # === Calculate time vector of stored frames ===
-        save_interval = max(1, self.Nt // self.n_frames)
-        frame_times = np.arange(0, self.Lt + self.dt, save_interval * self.dt)
-        
-        # === Target times for animation ===
-        target_times = np.linspace(0, self.Lt, self.n_frames)
-        
-        # Map target times to nearest frame indices
-        frame_indices = [np.argmin(np.abs(frame_times - t)) for t in target_times]
-    
-        if self.dim == 1:
-            fig, ax = plt.subplots()
-            line, = ax.plot(self.X, get_component(self.frames[0]))
-            ax.set_ylim(np.min(self.frames[0]), np.max(self.frames[0]))
-            ax.set_xlabel('x')
-            ax.set_ylabel(f'{component} of u')
-            ax.set_title('Initial condition')
-            plt.tight_layout()
-            plt.show()
-    
-            def update(frame_number):
-                frame = frame_indices[frame_number]
-                ydata = get_component(self.frames[frame])
-                line.set_ydata(ydata)
-                ax.set_ylim(np.min(ydata), np.max(ydata))
-                current_time = target_times[frame_number]
-                ax.set_title(f't = {current_time:.2f}')
-                return line,
-    
-            ani = FuncAnimation(fig, update, frames=len(target_times), interval=50)
-            return ani
-    
-        else:  # dim == 2
-            fig = plt.figure(figsize=(12, 6))
-            ax = fig.add_subplot(111, projection='3d')
-            ax.set_xlabel('x')
-            ax.set_ylabel('y')
-            ax.set_zlabel(f'{component.title()} of u')
-            ax.set_title('Initial condition')
-    
-            data0 = get_component(self.frames[0])
-            surf = [ax.plot_surface(self.X, self.Y, data0, cmap='viridis')]
-            plt.tight_layout()
-            plt.show()
-    
-            def update(frame_number):
-                frame = frame_indices[frame_number]
-                current_data = get_component(self.frames[frame])
-                z_offset = np.max(current_data) + 0.05 * (np.max(current_data) - np.min(current_data))
-    
-                ax.clear()
-                surf[0] = ax.plot_surface(self.X, self.Y, current_data,
-                                          cmap='viridis', vmin=-1, vmax=1 if component != 'angle' else np.pi)
-    
-                if overlay == 'contour':
-                    ax.contour(self.X, self.Y, current_data, levels=10, cmap='cool', offset=z_offset)
-    
-                ax.set_xlabel('x')
-                ax.set_ylabel('y')
-                ax.set_zlabel(f'{component.title()} of u')
-                current_time = target_times[frame_number]
-                ax.set_title(f'Solution at t = {current_time:.2f}')
-                return surf
-    
-            ani = FuncAnimation(fig, update, frames=len(target_times), interval=50)
-            return ani
 
     def compute_energy(self):
         """
@@ -1169,7 +1508,99 @@ class PDESolver:
         plt.legend()
         plt.tight_layout()
         plt.show()
+
     
+    def animate(self, component='abs', overlay='contour'):
+        """
+        Create an animated plot of the solution evolution.
+        Args:
+            component (str): 'real', 'imag', 'abs', or 'angle'.
+            overlay (str): Only used in 2D: 'contour' or 'front'.
+        """
+        def get_component(u):
+            if component == 'real':
+                return np.real(u)
+            elif component == 'imag':
+                return np.imag(u)
+            elif component == 'abs':
+                return np.abs(u)
+            elif component == 'angle':
+                return np.angle(u)
+            else:
+                raise ValueError("Invalid component")
+
+        print("\n*********************")
+        print("* Solution plotting *")
+        print("*********************\n")
+        
+        # === Calculate time vector of stored frames ===
+        save_interval = max(1, self.Nt // self.n_frames)
+        frame_times = np.arange(0, self.Lt + self.dt, save_interval * self.dt)
+        
+        # === Target times for animation ===
+        target_times = np.linspace(0, self.Lt, self.n_frames)
+        
+        # Map target times to nearest frame indices
+        frame_indices = [np.argmin(np.abs(frame_times - t)) for t in target_times]
+    
+        if self.dim == 1:
+            fig, ax = plt.subplots()
+            line, = ax.plot(self.X, get_component(self.frames[0]))
+            ax.set_ylim(np.min(self.frames[0]), np.max(self.frames[0]))
+            ax.set_xlabel('x')
+            ax.set_ylabel(f'{component} of u')
+            ax.set_title('Initial condition')
+            plt.tight_layout()
+            plt.show()
+    
+            def update(frame_number):
+                frame = frame_indices[frame_number]
+                ydata = get_component(self.frames[frame])
+                ydata_real = np.real(ydata) if np.iscomplexobj(ydata) else ydata
+                line.set_ydata(ydata_real)
+                ax.set_ylim(np.min(ydata_real), np.max(ydata_real))
+                current_time = target_times[frame_number]
+                ax.set_title(f't = {current_time:.2f}')
+                return line,
+    
+            ani = FuncAnimation(fig, update, frames=len(target_times), interval=50)
+            return ani
+    
+        else:  # dim == 2
+            fig = plt.figure(figsize=(12, 6))
+            ax = fig.add_subplot(111, projection='3d')
+            ax.set_xlabel('x')
+            ax.set_ylabel('y')
+            ax.set_zlabel(f'{component.title()} of u')
+            ax.set_title('Initial condition')
+    
+            data0 = get_component(self.frames[0])
+            surf = [ax.plot_surface(self.X, self.Y, data0, cmap='viridis')]
+            plt.tight_layout()
+            plt.show()
+    
+            def update(frame_number):
+                frame = frame_indices[frame_number]
+                current_data = get_component(self.frames[frame])
+                z_offset = np.max(current_data) + 0.05 * (np.max(current_data) - np.min(current_data))
+    
+                ax.clear()
+                surf[0] = ax.plot_surface(self.X, self.Y, current_data,
+                                          cmap='viridis', vmin=-1, vmax=1 if component != 'angle' else np.pi)
+    
+                if overlay == 'contour':
+                    ax.contour(self.X, self.Y, current_data, levels=10, cmap='cool', offset=z_offset)
+    
+                ax.set_xlabel('x')
+                ax.set_ylabel('y')
+                ax.set_zlabel(f'{component.title()} of u')
+                current_time = target_times[frame_number]
+                ax.set_title(f'Solution at t = {current_time:.2f}')
+                return surf
+    
+            ani = FuncAnimation(fig, update, frames=len(target_times), interval=50)
+            return ani
+
     def test(self, u_exact, t_eval=None, norm='relative', threshold=1e-2, plot=True, component='real'):
         """
         Test the solver by comparing the numerical solution to an exact solution.

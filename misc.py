@@ -1,5 +1,5 @@
 # Miscellaneous functions
-import numpy as np
+
 def gaussian_function_1D(x, center, sigma):
     A = 1 / np.sqrt(2 * np.pi * sigma**2)  # Amplitude so that the integral is equal to 1
     return A * np.exp(-((x - center)**2) / (2 * sigma**2))

@@ -2,28 +2,56 @@
 
 ## Overview
 
-`PDESolver` is a flexible and modular Python framework designed to solve partial differential equations (PDEs) numerically. It supports both 1D and 2D problems, and provides tools for analyzing wave propagation, stability, and energy conservation. The code leverages advanced numerical techniques such as spectral methods (via FFT), exponential time differencing (ETD), and Runge-Kutta schemes for temporal integration.
-
-This framework is particularly useful for researchers, engineers, and students working on physical simulations involving PDEs, including wave equations, diffusion processes, and nonlinear dynamics.
+`PDESolver` is a comprehensive and modular Python framework for the numerical solution and analysis of partial differential equations (PDEs) in 1D and 2D. It combines symbolic equation parsing with spectral methods to offer a flexible environment for wave propagation, dispersion analysis, and energy monitoring. New features include direct support for custom pseudo-differential operators and a suite of advanced visualization tools.
 
 ---
 
 ## Key Features
 
-- **Symbolic Parsing**: Automatically parses symbolic equations provided by the user to separate linear, nonlinear, and source terms.
-- **Spectral Methods**: Uses Fast Fourier Transform (FFT) for spatial discretization, ensuring high accuracy and efficiency.
-- **Dealiasing**: Implements spectral dealiasing to reduce aliasing errors in nonlinear terms.
-- **Time Integration Schemes**:
-  - Supports first-order and second-order temporal derivatives.
-  - Includes default exponential integration and optional ETD-RK4 schemes for improved stability.
-- **Wave Analysis**:
-  - Computes dispersion relations, phase velocities, and group velocities.
-  - Analyzes anisotropy in 2D systems.
-- **Energy Conservation**: Computes total energy over time for second-order systems, aiding in stability analysis.
-- **Visualization Tools**:
-  - Animates solutions in 1D (line plots) and 2D (surface plots).
-  - Provides overlays for contour lines or gradient fronts in 2D animations.
-- **Testing and Validation**: Compares numerical solutions with exact solutions to ensure accuracy.
+* **Symbolic Parsing**
+
+  * Automatically separates linear, nonlinear, symbolic operator, pseudo-differential, and source terms from user-defined equations.
+  * Supports both classical derivatives and custom operator wrappers (`Op` and `psiOp`).
+
+* **Pseudo-Differential Operators**
+
+  * Define fractional or nonlocal operators directly in Fourier space using `Op(symbol, u)` and `psiOp(symbol, u)` wrappers.
+  * Automatic extraction of operator symbols from symbolic expressions when needed.
+  * Numerical evaluation via the `PseudoDifferentialOperator` class for both 1D and 2D domains.
+
+* **Spectral Methods**
+
+  * Fast Fourier Transform (FFT) based spatial discretization for high accuracy.
+  * Dealiasing strategies to mitigate spectral aliasing errors.
+
+* **Time Integration Schemes**
+
+  * Exponential time stepping and ETD-RK4 methods for first-order and second-order time derivatives.
+  * Leap-frog and Runge-Kutta schemes for robust temporal evolution.
+
+* **Visualization and Analysis**
+
+  * **Wavefront Set**: Visualize the magnitude of operator symbols across position and frequency domains.
+  * **Cotangent Fiber Structure**: Contour plots showing symbol values over the phase space.
+  * **Symbol Amplitude and Phase Portraits**: Color maps of absolute values and phase of symbols.
+  * **Characteristic Set**: Contours indicating where the symbol vanishes.
+  * **Dynamic Wavefront**: Time-evolving wavefront visualization in 1D and 2D.
+  * Automated integration of symbol and solution visualizations during setup and solving.
+
+* **Wave Propagation Analysis**
+
+  * Compute and plot dispersion relations, phase velocity, and group velocity.
+  * Support for anisotropy analysis in 2D systems.
+
+* **Energy Monitoring**
+
+  * Track total energy over time for second-order systems.
+  * Plot energy evolution with options for linear and logarithmic scales.
+
+* **Animation Tools**
+
+  * Generate animations of solution evolution in 1D (line plots) and 2D (surface plots).
+  * Options for overlays, contour lines, or front gradients.
 
 ---
 
@@ -31,12 +59,12 @@ This framework is particularly useful for researchers, engineers, and students w
 
 ### Prerequisites
 
-- Python 3.8 or higher
-- Required libraries: `numpy`, `scipy`, `matplotlib`, `sympy`
+* Python 3.8 or higher
+* Required libraries: `numpy`, `scipy`, `matplotlib`, `sympy`
 
 ### Installing Dependencies
 
-You can install the required libraries using `pip`:
+Install the necessary packages via pip:
 
 ```bash
 pip install numpy scipy matplotlib sympy
@@ -44,126 +72,68 @@ pip install numpy scipy matplotlib sympy
 
 ### Downloading the Code
 
-Clone this repository to your local machine:
+Clone the repository and navigate into its directory:
 
 ```bash
 git clone https://github.com/phbillet/pdesolver.git
-cd PDESolver
+cd pdesolver
 ```
 
 ---
 
-## Usage
+## Quick Start
 
-### Step 1: Define Your PDE
+1. **Define a PDE** using SymPy:
 
-The solver accepts symbolic equations defined using SymPy. For example, to define a wave equation:
+   ```python
+   from sympy import symbols, Function, Eq, diff
+   from pdesolver import PDESolver
 
-```python
-from pdesolver import PDESolver
+   t, x = symbols('t x')
+   u = Function('u')(t, x)
+   equation = Eq(diff(u, t, t) - diff(u, x, 2), 0)
+   ```
 
-# Define symbols
-t, x = symbols('t x')
-u = Function('u')(t, x)
+2. **Initialize the Solver**:
 
-# Define the PDE
-equation = Eq(diff(u, t, t) - diff(u, x, x), 0)
-```
+   ```python
+   solver = PDESolver(equation)
+   ```
 
-### Step 2: Initialize the Solver
+3. **Setup Domain and Initial Conditions**:
 
-Pass the equation to the `PDESolver` class:
+   ```python
+   def initial_condition(x):
+       return np.exp(-x**2)
 
-```python
-solver = PDESolver(equation)
-```
+   solver.setup(
+       Lx=10, Nx=256,
+       Lt=5, Nt=1000,
+       initial_condition=initial_condition
+   )
+   ```
 
-### Step 3: Set Up the Domain and Initial Conditions
+4. **Solve the PDE**:
 
-Configure the computational domain, grid resolution, and initial conditions:
+   ```python
+   solver.solve()
+   ```
 
-```python
-def initial_condition(x):
-    return np.exp(-x**2)  # Example: Gaussian pulse
+5. **Visualize and Animate**:
 
-solver.setup(
-    Lx=10, Nx=256, Lt=5, Nt=1000,
-    initial_condition=initial_condition
-)
-```
-
-For second-order systems, you may also need to provide an initial velocity:
-
-```python
-def initial_velocity(x):
-    return np.zeros_like(x)
-
-solver.setup(
-    Lx=10, Nx=256, Lt=5, Nt=1000,
-    initial_condition=initial_condition,
-    initial_velocity=initial_velocity
-)
-```
-
-### Step 4: Solve the PDE
-
-Run the solver to compute the solution:
-
-```python
-solver.solve()
-```
-
-### Step 5: Visualize Results
-
-Animate the solution to observe its evolution over time:
-
-```python
-ani = solver.animate(component='abs')
-```
-
-You can also plot the energy evolution for second-order systems:
-
-```python
-solver.plot_energy(log=True)
-```
-
----
-
-## Testing
-
-The framework includes a testing utility to compare numerical solutions with exact solutions:
-
-```python
-def exact_solution(x, t):
-    return np.exp(-(x - t)**2)  # Example: Traveling Gaussian wave
-
-solver.test(exact_solution, t_eval=2.5, norm='relative', plot=True)
-```
-
----
-## Formulation of Differential Operators: Derivatives and Fourier-Space Symbols
-
-In `PDESolver`, linear operators can be formulated in two equivalent ways: either using classical derivatives (`diff`) or using symbolic Fourier-space expressions with `Op(symbol, u)`. Both approaches are internally unified by the solver during the setup phase.
-
-When derivatives are used, such as `diff(u, x, 2)` or `diff(u, t, t)`, the solver automatically translates them into their Fourier counterparts. Spatial derivatives (`x`, `y`) are mapped to powers of `i kx` and `i ky`, while time derivatives (`t`) introduce powers of `-i ω`. This allows the solver to infer the full symbolic dispersion relation without requiring the user to manually define it.
-
-Alternatively, users can directly specify pseudo-differential operators using `Op(symbol, u)`, where `symbol` is an explicit function of the Fourier variables `kx`, `ky`, or the temporal frequency `omega`. This is useful for fractional derivatives, nonlocal operators, or custom dispersions. 
-
-Both methods are fully compatible and can be mixed within the same PDE. Care must be taken to express spatial dependencies in terms of `kx`, `ky`, and temporal dependencies using `omega`, to ensure correct symbolic treatment.
-
-Choosing between derivatives and symbolic expressions offers flexibility: use derivatives for standard PDEs, and `Op` when precise control over the Fourier symbol is needed.
+   ```python
+   ani = solver.animate(component='abs')
+   solver.plot_energy(log=True)
+   ```
 
 ---
 
 ## Contributing
 
-Contributions are welcome! If you'd like to contribute to this project, please follow these steps:
-
-1. Fork the repository.
-2. Create a new branch for your feature or bug fix.
-3. Submit a pull request with a detailed description of your changes.
+Contributions are welcome! Please fork the repository, create a feature branch, and submit a pull request with a clear description of your changes.
 
 ---
+
 
 ## **License**
 
