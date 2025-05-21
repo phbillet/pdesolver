@@ -27,10 +27,13 @@ from sympy import (
     asin, acos, atan, acot, asec, acsc,
     sinh, cosh, tanh, coth, sech, csch,
     asinh, acosh, atanh, acoth, asech, acsch,
-    exp, ln, 
+    exp, ln, factorial, 
     diff, Derivative, integrate, 
     fourier_transform, inverse_fourier_transform,
 )
+from sympy.core.function import AppliedUndef
+from IPython.display import display
+from matplotlib import cm
 from matplotlib.animation import FuncAnimation
 from IPython.display import HTML
 from functools import partial
@@ -93,6 +96,7 @@ class PseudoDifferentialOperator:
         self.fft_workers = 4
         self.symbol_cached = None
         self.expr = expr
+        self.vars_x = vars_x
 
         if self.dim == 1:
             x, = vars_x
@@ -140,6 +144,23 @@ class PseudoDifferentialOperator:
         pprint(expr)
 
     def evaluate(self, X, Y, KX, KY, cache=True):
+        """
+        Evaluate the symbol on a spatial-frequency grid.
+
+        Parameters
+        ----------
+        X, Y : np.ndarray
+            Spatial grid coordinates (Y is ignored in 1D).
+        KX, KY : np.ndarray
+            Frequency grid coordinates (KY is ignored in 1D).
+        cache : bool, default=True
+            Whether to use/cached computed values.
+
+        Returns
+        -------
+        np.ndarray
+            Evaluated symbol values on the grid.
+        """
         if cache and self.symbol_cached is not None:
             return self.symbol_cached
 
@@ -156,9 +177,178 @@ class PseudoDifferentialOperator:
         return symbol
 
     def clear_cache(self):
+        """
+        Clear cached symbol evaluations.
+        """        
         self.symbol_cached = None
 
+    def is_elliptic_numerically(self, x_grid, xi_grid, threshold=1e-8):
+        """
+        Check if the symbol is elliptic on a grid of (x, xi) or (x, y, xi, eta),
+        with resampling to avoid memory explosion in 2D.
+    
+        Parameters
+        ----------
+        x_grid : ndarray
+            1D or 2D spatial grid (x or (x, y)).
+        xi_grid : ndarray
+            1D or 2D frequency grid (xi or (xi, eta)).
+        threshold : float
+            Minimum allowed magnitude of the symbol.
+    
+        Returns
+        -------
+        bool
+            True if elliptic on grid, False otherwise.
+        """
+        RESAMPLE_SIZE = 32  # Taille réduite pour éviter l'explosion mémoire
+    
+        if self.dim == 1:
+            x_vals = x_grid
+            xi_vals = xi_grid
+            # Rééchantillonnage si nécessaire
+            if len(x_vals) > RESAMPLE_SIZE:
+                x_vals = np.linspace(x_vals.min(), x_vals.max(), RESAMPLE_SIZE)
+            if len(xi_vals) > RESAMPLE_SIZE:
+                xi_vals = np.linspace(xi_vals.min(), xi_vals.max(), RESAMPLE_SIZE)
+    
+            X, XI = np.meshgrid(x_vals, xi_vals, indexing='ij')
+            symbol_vals = self.p_func(X, XI)
+    
+        elif self.dim == 2:
+            x_vals, y_vals = x_grid
+            xi_vals, eta_vals = xi_grid
+    
+            # Rééchantillonnage spatial
+            if len(x_vals) > RESAMPLE_SIZE:
+                x_vals = np.linspace(x_vals.min(), x_vals.max(), RESAMPLE_SIZE)
+            if len(y_vals) > RESAMPLE_SIZE:
+                y_vals = np.linspace(y_vals.min(), y_vals.max(), RESAMPLE_SIZE)
+    
+            # Rééchantillonnage fréquentiel
+            if len(xi_vals) > RESAMPLE_SIZE:
+                xi_vals = np.linspace(xi_vals.min(), xi_vals.max(), RESAMPLE_SIZE)
+            if len(eta_vals) > RESAMPLE_SIZE:
+                eta_vals = np.linspace(eta_vals.min(), eta_vals.max(), RESAMPLE_SIZE)
+    
+            X, Y, XI, ETA = np.meshgrid(x_vals, y_vals, xi_vals, eta_vals, indexing='ij')
+            symbol_vals = self.p_func(X, Y, XI, ETA)
+    
+        else:
+            raise NotImplementedError("Only 1D and 2D supported")
+    
+        min_abs_val = np.min(np.abs(symbol_vals))
+        return min_abs_val > threshold
+
+    def compose_asymptotic(self, other, order=1):
+        """
+        Compose self with another PseudoDifferentialOperator via asymptotic expansion.
+        """
+        assert self.dim == other.dim, "Operator dimensions must match"
+        p, q = self.expr, other.expr
+    
+        if self.dim == 1:
+            x = self.vars_x[0]
+            xi = symbols('xi', real=True)
+            result = 0
+            for n in range(order + 1):
+                term = (1 / factorial(n)) * diff(p, xi, n) * diff(q, x, n) * (1j)**(-n)
+                result += term
+    
+        elif self.dim == 2:
+            x, y = self.vars_x
+            xi, eta = symbols('xi eta', real=True)
+            result = 0
+            for n in range(order + 1):
+                for i in range(n + 1):
+                    j = n - i
+                    term = (1 / (factorial(i) * factorial(j))) * \
+                           diff(p, xi, i, eta, j) * diff(q, x, i, y, j) * (1j)**(-n)
+                    result += term
+    
+        return simplify(expand(result))
+
+    def right_inverse_asymptotic(self, order=1):
+        """
+        Construct right formal inverse R such that P \circ R = I + O(xi^{-order})
+        """
+        p = self.expr
+        if self.dim == 1:
+            x = self.vars_x[0]
+            xi = symbols('xi', real=True)
+            r = 1 / p.subs(xi, xi)  # r0
+            R = r
+            for n in range(1, order + 1):
+                term = 0
+                for k in range(1, n + 1):
+                    coeff = (1j)**(-k) / factorial(k)
+                    inner = diff(p, xi, k) * diff(R, x, k)
+                    term += coeff * inner
+                R = R - r * term
+        elif self.dim == 2:
+            x, y = self.vars_x
+            xi, eta = symbols('xi eta', real=True)
+            r = 1 / p.subs({xi: xi, eta: eta})
+            R = r
+            for n in range(1, order + 1):
+                term = 0
+                for k1 in range(n + 1):
+                    for k2 in range(n + 1 - k1):
+                        if k1 + k2 == 0: continue
+                        coeff = (1j)**(-(k1 + k2)) / (factorial(k1) * factorial(k2))
+                        dp = diff(p, xi, k1, eta, k2)
+                        dR = diff(R, x, k1, y, k2)
+                        term += coeff * dp * dR
+                R = R - r * term
+        return simplify(expand(R))
+
+    def left_inverse_asymptotic(self, order=1):
+        """
+        Construct left formal inverse L such that L \circ P = I + O(xi^{-order})
+        """
+        p = self.expr
+        if self.dim == 1:
+            x = self.vars_x[0]
+            xi = symbols('xi', real=True)
+            l = 1 / p.subs(xi, xi)
+            L = l
+            for n in range(1, order + 1):
+                term = 0
+                for k in range(1, n + 1):
+                    coeff = (1j)**(-k) / factorial(k)
+                    inner = diff(L, xi, k) * diff(p, x, k)
+                    term += coeff * inner
+                L = L - term * l
+        elif self.dim == 2:
+            x, y = self.vars_x
+            xi, eta = symbols('xi eta', real=True)
+            l = 1 / p.subs({xi: xi, eta: eta})
+            L = l
+            for n in range(1, order + 1):
+                term = 0
+                for k1 in range(n + 1):
+                    for k2 in range(n + 1 - k1):
+                        if k1 + k2 == 0: continue
+                        coeff = (1j)**(-(k1 + k2)) / (factorial(k1) * factorial(k2))
+                        dp = diff(p, x, k1, y, k2)
+                        dL = diff(L, xi, k1, eta, k2)
+                        term += coeff * dL * dp
+                L = L - term * l
+        return simplify(expand(L))
+
     def visualize_wavefront(self, x_grid, xi_grid, y_grid=None, eta_grid=None, xi0=0.0, eta0=0.0):
+        """
+        Visualize the wavefront set of the symbol.
+
+        Parameters
+        ----------
+        x_grid, y_grid : np.ndarray
+            Spatial grids.
+        xi_grid, eta_grid : np.ndarray
+            Frequency grids.
+        xi0, eta0 : float
+            Fixed frequency values for visualization.
+        """
         if self.dim == 1:
             symbol_vals = self.p_func(x_grid[:, None], xi_grid[None, :])
             plt.imshow(np.abs(symbol_vals), extent=[xi_grid.min(), xi_grid.max(), x_grid.min(), x_grid.max()], aspect='auto', origin='lower')
@@ -180,6 +370,16 @@ class PseudoDifferentialOperator:
             plt.show()
 
     def visualize_fiber(self, x_grid, xi_grid, y0=0.0, x0=0.0):
+        """
+        Visualize the fiber structure of the symbol.
+
+        Parameters
+        ----------
+        x_grid, xi_grid : np.ndarray
+            Spatial and frequency grids.
+        x0, y0 : float
+            Spatial position where to visualize the fiber.
+        """
         if self.dim == 1:
             X, XI = np.meshgrid(x_grid, xi_grid, indexing='ij')
             symbol_vals = self.p_func(X, XI)
@@ -200,6 +400,18 @@ class PseudoDifferentialOperator:
             plt.show()
 
     def visualize_symbol_amplitude(self, x_grid, xi_grid, y_grid=None, eta_grid=None, xi0=0.0, eta0=0.0):
+        """
+        Plot the amplitude of the symbol.
+
+        Parameters
+        ----------
+        x_grid, y_grid : np.ndarray
+            Spatial grids.
+        xi_grid, eta_grid : np.ndarray
+            Frequency grids.
+        xi0, eta0 : float
+            Fixed frequency values for visualization.
+        """
         if self.dim == 1:
             X, XI = np.meshgrid(x_grid, xi_grid, indexing='ij')
             symbol_vals = self.p_func(X, XI) 
@@ -222,6 +434,18 @@ class PseudoDifferentialOperator:
             plt.show()
 
     def visualize_phase(self, x_grid, xi_grid, y_grid=None, eta_grid=None, xi0=0.0, eta0=0.0):
+        """
+        Plot the phase of the symbol.
+
+        Parameters
+        ----------
+        x_grid, y_grid : np.ndarray
+            Spatial grids.
+        xi_grid, eta_grid : np.ndarray
+            Frequency grids.
+        xi0, eta0 : float
+            Fixed frequency values for visualization.
+        """
         if self.dim == 1:
             X, XI = np.meshgrid(x_grid, xi_grid, indexing='ij')
             symbol_vals = self.p_func(X, XI) 
@@ -244,6 +468,16 @@ class PseudoDifferentialOperator:
             plt.show()
 
     def visualize_characteristic_set(self, x_grid, xi_grid, y0=0.0, x0=0.0):
+        """
+        Plot the characteristic set of the symbol.
+
+        Parameters
+        ----------
+        x_grid, xi_grid : np.ndarray
+            Spatial and frequency grids.
+        x0, y0 : float
+            Spatial position where to analyze the characteristic set.
+        """
         if self.dim == 1:
             X, XI = np.meshgrid(x_grid, xi_grid, indexing='ij')
             symbol_vals = self.p_func(X, XI) 
@@ -262,6 +496,18 @@ class PseudoDifferentialOperator:
             plt.show()
 
     def visualize_dynamic_wavefront(self, x_grid, t_grid, y_grid=None, xi0=5.0, eta0=0.0):
+        """
+        Visualize dynamic wave propagation over time.
+
+        Parameters
+        ----------
+        x_grid, t_grid : np.ndarray
+            Spatial and temporal grids.
+        y_grid : np.ndarray, optional
+            Second spatial dimension (for 2D).
+        xi0, eta0 : float
+            Initial frequency values for wave propagation.
+        """
         if self.dim == 1:
             X, T = np.meshgrid(x_grid, t_grid)
             U = np.cos(xi0 * X - xi0 * T)
@@ -323,24 +569,56 @@ class PDESolver:
         
         # Extract symbols and function from the equation
         functions = equation.atoms(Function)
-        candidate_functions = [f for f in functions if any(str(arg) == 't' for arg in f.args)]
+        
+        # On ignore les wrappers psiOp et Op
+        excluded_wrappers = {'psiOp', 'Op'}
+        
+        # Extraction des fonctions candidates (hors wrappers)
+        candidate_functions = [
+            f for f in functions 
+            if f.func.__name__ not in excluded_wrappers
+        ]
+        
+        # Keep only user functions (u(x), u(x, t), etc.)
+        candidate_functions = [
+            f for f in functions
+            if isinstance(f, AppliedUndef)
+        ]
+        
+        # Stationary detection: no dependence on t
+        self.is_stationary = all(
+            not any(str(arg) == 't' for arg in f.args)
+            for f in candidate_functions
+        )
         
         if len(candidate_functions) != 1:
+            print("candidate_functions :", candidate_functions)
             raise ValueError("The equation must contain exactly one unknown function")
         
         self.u = candidate_functions[0]
+
+
         args = self.u.args
-        if len(args) < 2 or len(args) > 3:
-            raise ValueError("The function must depend on t and at least one spatial variable (x [, y])")
-    
-        self.t = args[0]
-        self.spatial_vars = args[1:]
+        
+        if self.is_stationary:
+            if len(args) not in (1, 2):
+                raise ValueError("Stationary problems must depend on 1 or 2 spatial variables")
+            self.spatial_vars = args
+        else:
+            if len(args) < 2 or len(args) > 3:
+                raise ValueError("The function must depend on t and at least one spatial variable (x [, y])")
+            self.t = args[0]
+            self.spatial_vars = args[1:]
+
         self.dim = len(self.spatial_vars)
         if self.dim == 1:
             self.x = self.spatial_vars[0]
             self.y = None
         elif self.dim == 2:
             self.x, self.y = self.spatial_vars
+        else:
+            raise ValueError("Only 1D and 2D problems are supported.")
+
     
         self.fft_workers = 4
         
@@ -369,7 +647,13 @@ class PDESolver:
             self.kx, self.ky = symbols('kx ky')
     
         # Compute linear operator
-        self.compute_linear_operator()
+        if not self.is_stationary:
+            self.compute_linear_operator()
+        else:
+            self.psi_ops = []
+            for coeff, sym_expr in self.pseudo_terms:
+                psi = PseudoDifferentialOperator(sym_expr, self.spatial_vars, self.u, mode='symbol')
+                self.psi_ops.append((coeff, psi))
 
     def parse_equation(self, equation):
         """
@@ -462,15 +746,26 @@ class PDESolver:
         print(f"Source terms: {source_terms}")
     
         if pseudo_terms:
-            time_terms = {term: coeff for term, coeff in linear_terms.items()
-                          if any(isinstance(arg, Derivative) or 'Derivative' in repr(term) for arg in [term])}
-            other_linear = {t: c for t, c in linear_terms.items() if t not in time_terms}
-            print("other_linear =", other_linear)
-            print("symbol_terms =", symbol_terms)
-    
-            if other_linear or symbol_terms:
+            # Vérifie si une dérivée temporelle est présente parmi les termes linéaires
+            has_time_derivative = any(
+                isinstance(term, Derivative) and self.t in [v for v, _ in term.variable_count]
+                for term in linear_terms
+            )
+            # Extrait les termes linéaires non temporels
+            invalid_linear_terms = {
+                term: coeff for term, coeff in linear_terms.items()
+                if not (
+                    isinstance(term, Derivative)
+                    and self.t in [v for v, _ in term.variable_count]
+                )
+                and term != self.u  # exclusion du terme u simple (sans dérivée)
+            }
+
+            if invalid_linear_terms or symbol_terms:
                 raise ValueError(
-                    "When using psiOp, only the time derivative term and the non-linear and source terms are permitted alongside the pseudo operator."
+                    "Lorsque psiOp est utilisé, seuls les termes non-linéaires, les termes source, "
+                    "et éventuellement une dérivée temporelle sont autorisés. "
+                    "Les autres termes linéaires et les Op sont interdits."
                 )
     
         return linear_terms, nonlinear_terms, symbol_terms, source_terms, pseudo_terms
@@ -586,7 +881,18 @@ class PDESolver:
     def linear_rhs(self, u, is_v=False):
         """
         Apply the linear operator (in Fourier space) to the field u or v.
-        Used to compute initial acceleration when no psiOp is used.
+
+        Parameters
+        ----------
+        u : np.ndarray
+            Input solution array.
+        is_v : bool
+            Whether to apply the operator to v instead of u.
+
+        Returns
+        -------
+        np.ndarray
+            Result of applying the linear operator.
         """
         if self.dim == 1:
             self.symbol_u = np.array(self.L(self.KX), dtype=np.complex128)
@@ -603,7 +909,24 @@ class PDESolver:
     def setup(self, Lx, Ly=None, Nx=None, Ny=None, Lt=1.0, Nt=100,
               initial_condition=None, initial_velocity=None, n_frames=100):
         """
-        Set up the computational grid, initial conditions, and (optionally) the curvilinear domain.
+        Set up the computational grid, initial conditions, and parameters.
+
+        Parameters
+        ----------
+        Lx, Ly : float
+            Domain size in x and y directions.
+        Nx, Ny : int
+            Number of spatial points in x and y directions.
+        Lt : float
+            Total simulation time.
+        Nt : int
+            Number of time steps.
+        initial_condition : callable
+            Function returning initial condition.
+        initial_velocity : callable, optional
+            Function returning initial velocity (for second-order equations).
+        n_frames : int
+            Number of frames to store during simulation.
         """
 
         # time stepping parameters
@@ -611,6 +934,7 @@ class PDESolver:
         self.dt = Lt / Nt
         self.n_frames = n_frames
         self.frames = []
+        self.initial_condition = initial_condition
 
         # check spatial dimension requirements
         if self.dim == 1:
@@ -781,7 +1105,14 @@ class PDESolver:
 
             
     def apply_boundary(self, u):
-        """Apply boundary conditions for a rectangular domain."""
+        """
+        Apply periodic boundary conditions.
+
+        Parameters
+        ----------
+        u : np.ndarray
+            Solution array.
+        """
         if self.dim == 1:
             u[0] = u[-2]
             u[-1] = u[1]
@@ -873,6 +1204,19 @@ class PDESolver:
             self.precomputed_symbols.append((coeff, raw_eval))
 
     def psiOp_fast(self, u):
+        """
+        Apply pseudo-differential operators via precomputed symbols.
+
+        Parameters
+        ----------
+        u : np.ndarray
+            Input solution array.
+
+        Returns
+        -------
+        np.ndarray
+            Updated solution after applying the operator.
+        """
         u_hat = self.fft(u)
         combined_symbol = np.zeros_like(u_hat, dtype=np.complex128)
     
@@ -1006,7 +1350,111 @@ class PDESolver:
             if self.temporal_order == 2 and not self.has_psi:
                 E = self.compute_energy()
                 self.energy_history.append(E)
+                
+    def solve_stationary_psiOp(self):
+        """
+        Solve P[u] = f(x) for stationary pseudo-differential problems using a symbolic approach.
+        - The operator P is given by psiOp terms.
+        - The source term f(x) is built from symbolic source_terms or initial_condition.
+        
+        Returns
+        -------
+        ndarray
+            The solution u(x) or u(x, y)
+        """
+        if not self.has_psi:
+            raise ValueError("Only supports problems with psiOp.")
+        
+        if self.linear_terms or self.nonlinear_terms:
+            raise ValueError("Stationary psiOp problems must be linear and purely pseudo-differential.")
+        
+        # Construction of the right-hand side rhs = source_terms + initial_condition
+        rhs = np.zeros_like(self.X if self.dim == 1 else self.X)
+    
+        if self.dim == 1:
+            vars = (self.x,)
+            freq_vars = (symbols('xi', real=True),)  # Variable fréquentielle en 1D
+        elif self.dim == 2:
+            vars = (self.x, self.y)
+            freq_vars = (symbols('xi', real=True), symbols('eta', real=True))  # Variables fréquentielles en 2D
+        else:
+            raise ValueError("Unsupported spatial dimension.")
+        
+        # 1. Add source_terms if they exist
+        if self.source_terms:
+            f_expr = sum(self.source_terms)
+            # Filter variables actually used in f_expr
+            used_vars = [v for v in vars if f_expr.has(v)]
+            f_func = lambdify(used_vars, f_expr, modules='numpy')
+            if self.dim == 1:
+                rhs += f_func(*[self.x_grid] if used_vars else [])
+            elif self.dim == 2:
+                rhs += f_func(*([self.X, self.Y][:len(used_vars)] if used_vars else []))
+        
+        # 2. Add initial_condition if it is defined
+        if self.initial_condition is not None:
+            if self.dim == 1:
+                rhs += self.initial_condition(self.x_grid)
+            elif self.dim == 2:
+                rhs += self.initial_condition(self.X, self.Y)
+        
+        # --- Build the total symbol ---
+        total_symbol = 0
+        for coeff, psi in self.psi_ops:
+            total_symbol += coeff * psi.expr  # Accumulate the symbolic expression
+        
+        # Create a PseudoDifferentialOperator for the total symbol
+        psi_total = PseudoDifferentialOperator(total_symbol, self.spatial_vars, mode='symbol')
 
+        # --- Numerical ellipticity check ---
+        if self.dim == 1:
+            X = self.X  # self.X is of shape (Nx,)
+            KX = self.KX  # self.KX is of shape (Nx,)
+            is_elliptic = psi_total.is_elliptic_numerically(X, KX)
+        else:
+            X = self.X[:, 0]  # x grid of size (Nx,)
+            Y = self.Y[0, :]  # y grid of size (Ny,)
+            KX = self.KX[:, 0]
+            KY = self.KY[0, :]
+            is_elliptic = psi_total.is_elliptic_numerically((X, Y), (KX, KY))
+        
+        if not is_elliptic:
+            raise ValueError("❌ The pseudo-differential symbol is not numerically elliptic on the grid.")
+        else:
+            print("✅ Elliptic pseudo-differential symbol: inversion allowed.")
+        
+        # Compute the right asymptotic inverse of the operator
+        R_symbol = psi_total.right_inverse_asymptotic(order=3)  # Adjust order as needed
+        print("Right inverse asymptotic symbol:")
+        pprint(R_symbol)
+        
+        # Ensure unique variables for lambdify
+        all_vars = list(dict.fromkeys(self.spatial_vars + psi_total.vars_x + freq_vars))  # Include freq_vars
+        print(f"all_vars = {all_vars}")
+        
+        R_func = lambdify(all_vars, R_symbol, 'numpy')
+        
+        # Evaluate the inverse symbol on the grid
+        if self.dim == 1:
+            R_vals = R_func(*([self.X, self.KX][:len(all_vars)] if all_vars else []))
+        elif self.dim == 2:
+            R_vals = R_func(*([self.X, self.Y, self.KX, self.KY][:len(all_vars)] if all_vars else []))
+        
+        # Transform the source term to Fourier space
+        f_hat = self.fft(rhs)
+        
+        # Apply the inverse symbol in Fourier space
+        u_hat = R_vals * f_hat
+
+        # Avoid division by zero
+        u_hat[np.abs(R_vals) < 1e-14] = 0
+        
+        # Transform back to physical space
+        u = self.ifft(u_hat)
+        u = np.array(u, dtype=np.complex128)
+        self.u = u
+        
+        return u
         
     def step_ETD_RK4(self, u):
         """
@@ -1110,8 +1558,12 @@ class PDESolver:
 
     def compute_combined_symbol(self):
         """
-        Evaluates the weighted sum of pseudo-differential symbols on the grid.
-        Returns a numpy array (complex128) of the same shape as the spectral grid.
+        Evaluate the weighted sum of pseudo-differential symbols on the grid.
+
+        Returns
+        -------
+        np.ndarray
+            Combined symbol values as a complex numpy array.
         """
         from sympy import N
     
@@ -1509,13 +1961,76 @@ class PDESolver:
         plt.tight_layout()
         plt.show()
 
+    def show_stationary_solution(self, u=None, component=r'abs', cmap='viridis'):
+        """
+        Display the stationary solution computed by solve_stationary_psiOp.
+        
+        Parameters
+        ----------
+        u : ndarray, optional
+            Precomputed solution array. If None, calls solve_stationary_psiOp().
+        cmap : str, optional
+            Colormap to use for 2D display (default: 'viridis')
+        """
+        def get_component(u):
+            if component == 'real':
+                return np.real(u)
+            elif component == 'imag':
+                return np.imag(u)
+            elif component == 'abs':
+                return np.abs(u)
+            elif component == 'angle':
+                return np.angle(u)
+            else:
+                raise ValueError("Invalid component")
+                
+        if u is None:
+            u = self.solve_stationary_psiOp()
+
+        if self.dim == 1:
+            # Plot the solution in 1D
+            plt.figure(figsize=(8, 4))
+            plt.plot(self.x_grid, get_component(u), label=f'{component} of u')
+            plt.xlabel('x')
+            plt.ylabel(f'{component} of u')
+            plt.title('Stationary solution (1D)')
+            plt.grid(True)
+            plt.legend()
+            plt.tight_layout()
+            plt.show()
+    
+        elif self.dim == 2:
+            fig = plt.figure(figsize=(12, 6))
+            ax = fig.add_subplot(111, projection='3d')
+            ax.set_xlabel('x')
+            ax.set_ylabel('y')
+            ax.set_zlabel(f'{component.title()} of u')
+            ax.set_title('Initial condition')
+    
+            data0 = get_component(u)
+            surf = [ax.plot_surface(self.X, self.Y, data0, cmap='viridis')]
+            plt.tight_layout()
+            plt.show()
+    
+        else:
+            raise ValueError("Only 1D and 2D display are supported.")
+
     
     def animate(self, component='abs', overlay='contour'):
         """
         Create an animated plot of the solution evolution.
-        Args:
-            component (str): 'real', 'imag', 'abs', or 'angle'.
-            overlay (str): Only used in 2D: 'contour' or 'front'.
+
+        Parameters
+        ----------
+        component : str {'real', 'imag', 'abs', 'angle'}
+            Component of the solution to animate.
+        overlay : str {'contour', 'front'}, optional
+            Overlay type in 2D animations.
+
+        Returns
+        -------
+        FuncAnimation
+            Animation object.
         """
         def get_component(u):
             if component == 'real':
@@ -1603,40 +2118,59 @@ class PDESolver:
 
     def test(self, u_exact, t_eval=None, norm='relative', threshold=1e-2, plot=True, component='real'):
         """
-        Test the solver by comparing the numerical solution to an exact solution.
-        
-        Args:
-            u_exact (callable): Exact solution function u(x[, y], t).
-            t_eval (float, optional): Time at which to compare (default: final time).
-            norm (str): 'relative' or 'absolute'.
-            threshold (float): Threshold for the error.
-            plot (bool): Whether to display plots.
-            component (str): 'real', 'imag', or 'abs' for comparison.
+        Test the solver against an exact solution.
+    
+        Parameters
+        ----------
+        u_exact : callable
+            Exact solution function.
+        t_eval : float, optional
+            Time at which to compare (ignored if stationary).
+        norm : str {'relative', 'absolute'}
+            Type of error norm.
+        threshold : float
+            Acceptable error threshold.
+        plot : bool
+            Whether to display plots.
+        component : str {'real', 'imag', 'abs'}
+            Component to compare.
         """
-        if t_eval is None:
-            t_eval = self.Lt
+        if self.is_stationary:
+            print("Testing a stationary solution.")
+            u_num = self.u
     
-        # Find the closest frame index corresponding to time t_eval
-        save_interval = max(1, self.Nt // self.n_frames)
-        frame_times = np.arange(0, self.Lt + self.dt, save_interval * self.dt)  # All possible times
-        frame_index = np.argmin(np.abs(frame_times - t_eval))  # Closest index
-        actual_t = frame_times[frame_index]
-        print(f"Closest available time to t_eval={t_eval}: {actual_t}")
-    
-        if frame_index >= len(self.frames):
-            raise ValueError(f"Time t = {t_eval} exceeds simulation duration.")
-        
-        u_num = self.frames[frame_index]
-    
-        # Compute the exact solution at the actual time
-        if self.dim == 1:
-            u_ex = u_exact(self.X, actual_t)
-        elif self.dim == 2:
-            u_ex = u_exact(self.X, self.Y, actual_t)
+            # Compute exact solution
+            if self.dim == 1:
+                u_ex = u_exact(self.X)
+            elif self.dim == 2:
+                u_ex = u_exact(self.X, self.Y)
+            else:
+                raise ValueError("Unsupported dimension.")
+            actual_t = None
         else:
-            raise ValueError("Unsupported dimension.")
+            if t_eval is None:
+                t_eval = self.Lt
     
-        # Select component for comparison
+            save_interval = max(1, self.Nt // self.n_frames)
+            frame_times = np.arange(0, self.Lt + self.dt, save_interval * self.dt)
+            frame_index = np.argmin(np.abs(frame_times - t_eval))
+            actual_t = frame_times[frame_index]
+            print(f"Closest available time to t_eval={t_eval}: {actual_t}")
+    
+            if frame_index >= len(self.frames):
+                raise ValueError(f"Time t = {t_eval} exceeds simulation duration.")
+    
+            u_num = self.frames[frame_index]
+    
+            # Compute exact solution at the actual time
+            if self.dim == 1:
+                u_ex = u_exact(self.X, actual_t)
+            elif self.dim == 2:
+                u_ex = u_exact(self.X, self.Y, actual_t)
+            else:
+                raise ValueError("Unsupported dimension.")
+    
+        # Select component
         if component == 'real':
             diff = np.real(u_num) - np.real(u_ex)
             ref = np.real(u_ex)
@@ -1657,18 +2191,20 @@ class PDESolver:
         else:
             raise ValueError("Unknown norm type.")
     
-        print(f"Test error at t = {actual_t}: {error:.3e}")
-        assert error < threshold, f"Error too large at t = {actual_t}: {error:.3e}"
+        label_time = f"t = {actual_t}" if actual_t is not None else ""
+        print(f"Test error {label_time}: {error:.3e}")
+        assert error < threshold, f"Error too large {label_time}: {error:.3e}"
     
-        # Optional plots
+        # Plot
         if plot:
             if self.dim == 1:
+                import matplotlib.pyplot as plt
                 plt.figure(figsize=(12, 6))
                 plt.subplot(2, 1, 1)
                 plt.plot(self.X, np.real(u_num), label='Numerical')
-                plt.plot(self.X, np.real(u_ex), label='Exact', linestyle='--')
+                plt.plot(self.X, np.real(u_ex), '--', label='Exact')
+                plt.title(f'Solution {label_time}, error = {error:.2e}')
                 plt.legend()
-                plt.title(f'Solution at t = {actual_t}, error = {error:.2e}')
                 plt.grid()
     
                 plt.subplot(2, 1, 2)
@@ -1678,6 +2214,7 @@ class PDESolver:
                 plt.tight_layout()
                 plt.show()
             else:
+                import matplotlib.pyplot as plt
                 plt.figure(figsize=(15, 5))
                 plt.subplot(1, 3, 1)
                 plt.title("Numerical Solution")

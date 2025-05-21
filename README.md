@@ -24,10 +24,21 @@
   * Fast Fourier Transform (FFT) based spatial discretization for high accuracy.
   * Dealiasing strategies to mitigate spectral aliasing errors.
 
-* **Time Integration Schemes**
 
-  * Exponential time stepping and ETD-RK4 methods for first-order and second-order time derivatives.
-  * Leap-frog and Runge-Kutta schemes for robust temporal evolution.
+* **Evolution Equation Support**
+
+  * `PDESolver` provides robust support for time-dependent **evolution equations**, including first- and second-order PDEs in time.
+  * The solver uses spectral methods combined with advanced time-stepping schemes :
+      * Exponential time stepping and ETD-RK4 methods for first-order and second-order time derivatives.
+      * Leap-frog and Runge-Kutta schemes for robust temporal evolution.
+  *  It automatically extracts dispersion relations from symbolic equations and applies appropriate temporal integrators based on the structure of the linear operator. This enables accurate simulation of wave propagation, dispersive effects, and energy-preserving dynamics.
+
+
+* **Stationary PDE Support**
+
+  * In addition to time-dependent problems, `PDESolver` offers robust support for solving **stationary partial differential equations** using spectral methods and asymptotic inversion techniques for `psiOp(symbol, u)` operators.
+  * This is particularly useful for elliptic equations and problems involving pseudo-differential operators.
+  * Visualization tools are also integrated to analyze the operator symbol, solution structure, and error against exact solutions.
 
 * **Visualization and Analysis**
 
