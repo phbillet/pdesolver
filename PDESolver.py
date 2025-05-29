@@ -19,9 +19,9 @@ from sympy import (
     symbols, Function, 
     solve, pprint, Mul,
     lambdify, expand, Eq, simplify, trigsimp, N,
+    radsimp, ratsimp, cancel,
     Lambda, Piecewise, Basic, degree, Pow, preorder_traversal,
-    sqrt, 
-    I,  pi,
+    sqrt, I,  pi, series, oo, 
     re, im, arg, Abs, conjugate, 
     sin, cos, tan, cot, sec, csc, sinc,
     asin, acos, atan, acot, asec, acsc,
@@ -266,7 +266,7 @@ class PseudoDifferentialOperator:
                            diff(p, xi, i, eta, j) * diff(q, x, i, y, j) * (1j)**(-n)
                     result += term
     
-        return simplify(expand(result))
+        return result
 
     def right_inverse_asymptotic(self, order=1):
         """
@@ -300,7 +300,7 @@ class PseudoDifferentialOperator:
                         dR = diff(R, x, k1, y, k2)
                         term += coeff * dp * dR
                 R = R - r * term
-        return simplify(expand(R))
+        return R
 
     def left_inverse_asymptotic(self, order=1):
         """
@@ -334,7 +334,7 @@ class PseudoDifferentialOperator:
                         dL = diff(L, xi, k1, eta, k2)
                         term += coeff * dL * dp
                 L = L - term * l
-        return simplify(expand(L))
+        return L
 
     def visualize_wavefront(self, x_grid, xi_grid, y_grid=None, eta_grid=None, xi0=0.0, eta0=0.0):
         """
@@ -527,6 +527,7 @@ class PseudoDifferentialOperator:
             plt.title(f'Dynamic Wavefront at t={t_grid[0]}')
             plt.show()
 
+
 class PDESolver:
     """
     A PDE solver based on spectral methods using Fourier transforms.
@@ -701,15 +702,28 @@ class PDESolver:
         for term in lhs_expanded.as_ordered_terms():
             print(f"Analyzing term: {term}")
     
+            if isinstance(term, psiOp):
+                expr = term.args[0]
+                pseudo_terms.append((1, expr))
+                print("  --> Classified as pseudo linear term (psiOp)")
+                continue
+            
+            # Sinon, cherche psiOp à l’intérieur (cas général)
             if term.has(psiOp):
                 psiops = term.atoms(psiOp)
                 for psi in psiops:
-                    coeff = term / psi
-                    expr = psi.args[0]
-                    pseudo_terms.append((coeff, expr))
-                    print("  --> Classified as pseudo linear term (psiOp)")
+                    try:
+                        coeff = simplify(term / psi)
+                        expr = psi.args[0]
+                        pseudo_terms.append((coeff, expr))
+                        print("  --> Classified as pseudo linear term (psiOp)")
+                    except Exception as e:
+                        print(f"  ⚠️  Failed to extract psiOp coefficient in term: {term}")
+                        print(f"     Reason: {e}")
+                        nonlinear_terms.append(term)
+                        print("  --> Fallback: classified as nonlinear")
                 continue
-    
+                
             if term.has(Op):
                 ops = term.atoms(Op)
                 for op in ops:
@@ -965,21 +979,23 @@ class PDESolver:
                 nonzero = omega_val != 0
                 self.inv_omega[nonzero] = 1.0 / omega_val[nonzero]
 
-            self.u_prev = initial_condition(self.X)
-
             if self.has_psi:
                 self.prepare_symbol_tables()
             
-            if self.temporal_order == 2:
-                self.v_prev = initial_velocity(self.X) if initial_velocity is not None else np.zeros_like(self.X)
-            
-                if self.has_psi:
-                    acc0 = self.psiOp_fast(self.u_prev)
-                else:
-                    acc0 = self.linear_rhs(self.u_prev, is_v=False)
-            
-                self.u_prev2 = self.u_prev + self.dt * self.v_prev + 0.5 * self.dt**2 * acc0
+            if not self.is_stationary:
+                self.u_prev = initial_condition(self.X)
 
+                if self.temporal_order == 2:
+                    self.v_prev = initial_velocity(self.X) if initial_velocity is not None else np.zeros_like(self.X)
+                
+                    if self.has_psi:
+                        acc0 = self.psiOp_fast(self.u_prev)
+                    else:
+                        acc0 = self.linear_rhs(self.u_prev, is_v=False)
+                
+                    self.u_prev2 = self.u_prev + self.dt * self.v_prev + 0.5 * self.dt**2 * acc0
+
+            
         # 2D grid
         else:
             self.Lx, self.Ly = Lx, Ly
@@ -1012,45 +1028,48 @@ class PDESolver:
                 L_vals = self.L(self.KX, self.KY)
                 self.exp_L = np.exp(L_vals * self.dt)
 
-        # initial condition for u
-        if self.dim == 1:
-            self.u_prev = initial_condition(self.X)
-        else:
-            self.u_prev = initial_condition(self.X, self.Y)
-        self.apply_boundary(self.u_prev)
-
-        # for second order in time, set initial velocity v_prev
-        if self.temporal_order == 2:
-            if initial_velocity is None:
-                raise ValueError("Initial velocity must be provided for second-order temporal derivatives")
-            if self.dim == 1:
-                self.v_prev = initial_velocity(self.X)
-            else:
-                self.v_prev = initial_velocity(self.X, self.Y)
-
         if self.has_psi:
             self.prepare_symbol_tables()
 
-        if self.temporal_order == 2:
-            if not hasattr(self, 'u_prev2'):
-                # Compute initial acceleration a0 = L[u0] + nonlinear + source
-                if self.has_psi:
-                    acc0 = self.psiOp_fast(self.u_prev)
+        if not self.is_stationary:
+            # initial condition for u
+            if self.dim == 1:
+                self.u_prev = initial_condition(self.X)
+            else:
+                self.u_prev = initial_condition(self.X, self.Y)
+        
+            self.apply_boundary(self.u_prev)
+    
+            # for second order in time, set initial velocity v_prev
+            if self.temporal_order == 2:
+                if initial_velocity is None:
+                    raise ValueError("Initial velocity must be provided for second-order temporal derivatives")
+                if self.dim == 1:
+                    self.v_prev = initial_velocity(self.X)
                 else:
-                    acc0 = self.linear_rhs(self.u_prev, is_v=False)
-        
-                rhs_nl = self.apply_nonlinear(self.u_prev, is_v=False)
-                acc0 += rhs_nl
-        
-                if hasattr(self, 'source_terms') and self.source_terms:
-                    # Evaluate source at t=0 similarly
-                    source_contribution = 0  # (Add source evaluation here if needed)
-                    acc0 += source_contribution
-        
-                # Initialize u_prev2 by Taylor expansion
-                self.u_prev2 = self.u_prev + self.dt * self.v_prev + 0.5 * self.dt**2 * acc0
+                    self.v_prev = initial_velocity(self.X, self.Y)
 
-        self.frames = [self.u_prev.copy()]
+            if self.temporal_order == 2:
+                if not hasattr(self, 'u_prev2'):
+                    # Compute initial acceleration a0 = L[u0] + nonlinear + source
+                    if self.has_psi:
+                        acc0 = self.psiOp_fast(self.u_prev)
+                    else:
+                        acc0 = self.linear_rhs(self.u_prev, is_v=False)
+            
+                    rhs_nl = self.apply_nonlinear(self.u_prev, is_v=False)
+                    acc0 += rhs_nl
+            
+                    if hasattr(self, 'source_terms') and self.source_terms:
+                        # Evaluate source at t=0 similarly
+                        source_contribution = 0  # (Add source evaluation here if needed)
+                        acc0 += source_contribution
+            
+                    # Initialize u_prev2 by Taylor expansion
+                    self.u_prev2 = self.u_prev + self.dt * self.v_prev + 0.5 * self.dt**2 * acc0
+
+            self.frames = [self.u_prev.copy()]
+
         
         if self.has_psi:
             self.visualize_total_psi_symbol()
@@ -1349,14 +1368,19 @@ class PDESolver:
             # Energy monitoring only in linear case without psiOp
             if self.temporal_order == 2 and not self.has_psi:
                 E = self.compute_energy()
-                self.energy_history.append(E)
-                
-    def solve_stationary_psiOp(self):
+                self.energy_history.append(E)         
+    
+    def solve_stationary_psiOp(self, order=3):
         """
-        Solve P[u] = f(x) for stationary pseudo-differential problems using a symbolic approach.
-        - The operator P is given by psiOp terms.
-        - The source term f(x) is built from symbolic source_terms or initial_condition.
-        
+        Solve P[u] = f(x) or f(x,y) for stationary pseudo-differential problems using asymptotic inversion.
+    
+        Parameters
+        ----------
+        order : int
+            Order of the asymptotic inverse expansion.
+        method : str
+            'diagonal' for fast approximate inverse (default), 'full' for pointwise exact inverse (slower).
+    
         Returns
         -------
         ndarray
@@ -1364,98 +1388,168 @@ class PDESolver:
         """
         if not self.has_psi:
             raise ValueError("Only supports problems with psiOp.")
-        
+    
         if self.linear_terms or self.nonlinear_terms:
             raise ValueError("Stationary psiOp problems must be linear and purely pseudo-differential.")
-        
-        # Construction of the right-hand side rhs = source_terms + initial_condition
-        rhs = np.zeros_like(self.X if self.dim == 1 else self.X)
     
         if self.dim == 1:
-            vars = (self.x,)
-            freq_vars = (symbols('xi', real=True),)  # Variable fréquentielle en 1D
+            x = self.x
+            xi = symbols('xi', real=True)
+            spatial_vars = (x,)
+            freq_vars = (xi,)
+            X, KX = self.X, self.KX
         elif self.dim == 2:
-            vars = (self.x, self.y)
-            freq_vars = (symbols('xi', real=True), symbols('eta', real=True))  # Variables fréquentielles en 2D
+            x, y = self.x, self.y
+            xi, eta = symbols('xi eta', real=True)
+            spatial_vars = (x, y)
+            freq_vars = (xi, eta)
+            X, Y, KX, KY = self.X, self.Y, self.KX, self.KY
         else:
             raise ValueError("Unsupported spatial dimension.")
-        
-        # 1. Add source_terms if they exist
-        if self.source_terms:
-            f_expr = sum(self.source_terms)
-            # Filter variables actually used in f_expr
-            used_vars = [v for v in vars if f_expr.has(v)]
-            f_func = lambdify(used_vars, f_expr, modules='numpy')
-            if self.dim == 1:
-                rhs += f_func(*[self.x_grid] if used_vars else [])
-            elif self.dim == 2:
-                rhs += f_func(*([self.X, self.Y][:len(used_vars)] if used_vars else []))
-        
-        # 2. Add initial_condition if it is defined
-        if self.initial_condition is not None:
-            if self.dim == 1:
-                rhs += self.initial_condition(self.x_grid)
-            elif self.dim == 2:
-                rhs += self.initial_condition(self.X, self.Y)
-        
-        # --- Build the total symbol ---
-        total_symbol = 0
-        for coeff, psi in self.psi_ops:
-            total_symbol += coeff * psi.expr  # Accumulate the symbolic expression
-        
-        # Create a PseudoDifferentialOperator for the total symbol
-        psi_total = PseudoDifferentialOperator(total_symbol, self.spatial_vars, mode='symbol')
-
-        # --- Numerical ellipticity check ---
+    
+        total_symbol = sum(coeff * psi.expr for coeff, psi in self.psi_ops)
+        psi_total = PseudoDifferentialOperator(total_symbol, spatial_vars, mode='symbol')
+    
+        # Check ellipticity
         if self.dim == 1:
-            X = self.X  # self.X is of shape (Nx,)
-            KX = self.KX  # self.KX is of shape (Nx,)
             is_elliptic = psi_total.is_elliptic_numerically(X, KX)
         else:
-            X = self.X[:, 0]  # x grid of size (Nx,)
-            Y = self.Y[0, :]  # y grid of size (Ny,)
-            KX = self.KX[:, 0]
-            KY = self.KY[0, :]
-            is_elliptic = psi_total.is_elliptic_numerically((X, Y), (KX, KY))
-        
+            is_elliptic = psi_total.is_elliptic_numerically((X[:, 0], Y[0, :]), (KX[:, 0], KY[0, :]))
         if not is_elliptic:
             raise ValueError("❌ The pseudo-differential symbol is not numerically elliptic on the grid.")
-        else:
-            print("✅ Elliptic pseudo-differential symbol: inversion allowed.")
-        
-        # Compute the right asymptotic inverse of the operator
-        R_symbol = psi_total.right_inverse_asymptotic(order=3)  # Adjust order as needed
+        print("✅ Elliptic pseudo-differential symbol: inversion allowed.")
+    
+        R_symbol = psi_total.right_inverse_asymptotic(order=order)
         print("Right inverse asymptotic symbol:")
         pprint(R_symbol)
-        
-        # Ensure unique variables for lambdify
-        all_vars = list(dict.fromkeys(self.spatial_vars + psi_total.vars_x + freq_vars))  # Include freq_vars
-        print(f"all_vars = {all_vars}")
-        
-        R_func = lambdify(all_vars, R_symbol, 'numpy')
-        
-        # Evaluate the inverse symbol on the grid
-        if self.dim == 1:
-            R_vals = R_func(*([self.X, self.KX][:len(all_vars)] if all_vars else []))
-        elif self.dim == 2:
-            R_vals = R_func(*([self.X, self.Y, self.KX, self.KY][:len(all_vars)] if all_vars else []))
-        
-        # Transform the source term to Fourier space
-        f_hat = self.fft(rhs)
-        
-        # Apply the inverse symbol in Fourier space
-        u_hat = R_vals * f_hat
 
-        # Avoid division by zero
-        u_hat[np.abs(R_vals) < 1e-14] = 0
-        
-        # Transform back to physical space
-        u = self.ifft(u_hat)
-        u = np.array(u, dtype=np.complex128)
+        if self.dim == 1:
+            if R_symbol.has(x):
+                R_func = lambdify((x, xi), R_symbol, modules='numpy')
+            else:
+                R_func = lambdify((xi,), R_symbol, modules='numpy')
+        else:
+            if R_symbol.has(x) or R_symbol.has(y):
+                R_func = lambdify((x, y, xi, eta), R_symbol, modules='numpy')
+            else:
+                R_func = lambdify((xi, eta), R_symbol, modules='numpy')
+    
+        # Build rhs
+        if self.source_terms:
+            f_expr = sum(self.source_terms)
+            used_vars = [v for v in spatial_vars if f_expr.has(v)]
+            f_func = lambdify(used_vars, -f_expr, modules='numpy')
+            if self.dim == 1:
+                rhs = f_func(self.x_grid) if used_vars else np.zeros_like(self.x_grid)
+            else:
+                rhs = f_func(self.X, self.Y) if used_vars else np.zeros_like(self.X)
+        elif self.initial_condition:
+            raise ValueError("Initial condition should be None for stationnary equation.")
+        else:
+            raise ValueError("No source term provided to construct the right-hand side.")
+    
+        f_hat = self.fft(rhs)
+    
+        if self.dim == 1:
+            Nx = self.Nx
+            if not R_symbol.has(x):
+                print("⚡ Optimisation : symbole indépendant de x — produit direct en Fourier.")
+                R_vals = R_func(self.KX)
+                u_hat = R_vals * f_hat
+                u = np.fft.ifft(u_hat)
+            else:
+                print("⚙️  Quantification de Kohn-Nirenberg 1D")
+                x, xi = symbols('x xi', real=True)
+                R_func = lambdify((x, xi), R_symbol, 'numpy')  # Still 2 args for uniformity
+                u = self.kohn_nirenberg_fft(f_vals=rhs, symbol_func=R_func)
+                
+        elif self.dim == 2:
+            Nx, Ny = self.Nx, self.Ny
+            if not R_symbol.has(x) and not R_symbol.has(y):
+                print("⚡ Optimisation : symbole indépendant de x et y — produit direct en Fourier 2D.")
+                R_vals = np.vectorize(R_func)(self.KX, self.KY)
+                u_hat = R_vals * f_hat
+                u = np.fft.ifft2(u_hat)
+            else:
+                print("⚙️  Quantification de Kohn-Nirenberg 2D")
+                x, xi, y, eta = symbols('x xi y eta', real=True)
+                R_func = lambdify((x, y, xi, eta), R_symbol, 'numpy')  # Still 2 args for uniformity
+                u = self.kohn_nirenberg_fft(f_vals=rhs, symbol_func=R_func)
         self.u = u
-        
         return u
-        
+
+    def kohn_nirenberg_fft(self, f_vals, symbol_func):
+        """
+        Kohn-Nirenberg quantization applying Op(p)[u] using existing solver attributes.
+    
+        Parameters
+        ----------
+        f_vals : np.ndarray
+            Input spatial function values on the solver grid.
+        symbol_func : callable
+            Symbol function p(x, xi) or p(x, y, xi, eta).
+    
+        Returns
+        -------
+        u : np.ndarray
+            Transformed function as Op(p)[f_vals].
+        """
+        # Determine dimension and grid spacing
+        xg = self.x_grid
+        dx = xg[1] - xg[0]
+    
+        if self.dim == 1:
+            # Use precomputed frequency grid
+            k = 2 * np.pi * np.fft.fftshift(np.fft.fftfreq(self.Nx, d=dx))
+            dk = k[1] - k[0]
+    
+            # Shift input for centered FFT
+            f_shift = np.fft.ifftshift(f_vals)
+            f_hat = self.fft(f_shift) * dx
+            f_hat = np.fft.fftshift(f_hat)
+    
+            # Build meshgrid (x, k)
+            X, K = np.meshgrid(xg, k, indexing='ij')
+    
+            # Evaluate symbol and apply spectral taper
+            P = symbol_func(X, K)
+            P *= np.exp(- (K / K.max())**4)
+    
+            # Compute integrand and integrate over frequency
+            integrand = P * f_hat[None, :] * np.exp(1j * X * K)
+            u = integrand.sum(axis=1) * dk / (2 * np.pi)
+            return u
+    
+        else:
+            # 2D solver attributes
+            yg = self.y_grid
+            dy = yg[1] - yg[0]
+            kx = 2 * np.pi * np.fft.fftfreq(self.Nx, d=dx)
+            ky = 2 * np.pi * np.fft.fftfreq(self.Ny, d=dy)
+    
+            # 2D FFT of f_vals
+            f_hat = self.fft(f_vals) * dx * dy
+    
+            # Create broadcasted grids
+            X, Y = np.meshgrid(xg, yg, indexing='ij')
+            KX, KY = np.meshgrid(kx, ky, indexing='ij')
+            Xb = X[:, :, None, None]
+            Yb = Y[:, :, None, None]
+            KXb = KX[None, None, :, :]
+            KYb = KY[None, None, :, :]
+    
+            # Evaluate symbol and kernel
+            P_vals = symbol_func(Xb, Yb, KXb, KYb)
+            phase = np.exp(1j * (Xb * KXb + Yb * KYb))
+    
+            # Integrate over frequency dimensions
+            integrand = P_vals * phase * f_hat[None, None, :, :]
+            dkx = kx[1] - kx[0]
+            dky = ky[1] - ky[0]
+            u = np.sum(integrand, axis=(2, 3)) * dkx * dky / (2 * np.pi)**2
+            return u
+
+            
     def step_ETD_RK4(self, u):
         """
         Perform one ETD-RK4 time step for first-order time PDEs.
