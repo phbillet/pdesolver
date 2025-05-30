@@ -495,6 +495,8 @@ class PseudoDifferentialOperator:
             plt.title(f'Characteristic Set at x={x0}, y={y0}')
             plt.show()
 
+    
+
     def visualize_dynamic_wavefront(self, x_grid, t_grid, y_grid=None, xi0=5.0, eta0=0.0):
         """
         Visualize dynamic wave propagation over time.
@@ -690,7 +692,12 @@ class PDESolver:
             lhs = equation
     
         print(f"\nEquation rewritten in standard form: {lhs}")
-        lhs_expanded = expand(lhs)
+        if lhs.has(psiOp):
+            print("⚠️ psiOp detected: skipping expansion for safety")
+            lhs_expanded = lhs
+        else:
+            lhs_expanded = expand(lhs)
+        
         print(f"\nExpanded equation: {lhs_expanded}")
     
         linear_terms = {}
@@ -1225,34 +1232,51 @@ class PDESolver:
     def psiOp_fast(self, u):
         """
         Apply pseudo-differential operators via precomputed symbols.
-
+        Automatically switches to Kohn-Nirenberg quantization when symbol depends on spatial variables.
         Parameters
         ----------
         u : np.ndarray
             Input solution array.
-
         Returns
         -------
         np.ndarray
             Updated solution after applying the operator.
         """
-        u_hat = self.fft(u)
-        combined_symbol = np.zeros_like(u_hat, dtype=np.complex128)
+        # Check if any symbol depends on spatial variables using symbolic expressions
+        use_kohn_nirenberg = False
+        for coeff, expr in self.pseudo_terms:
+            if expr.has(self.x) or (self.dim == 2 and expr.has(self.y)):
+                use_kohn_nirenberg = True
+                break
     
-        for coeff, precomputed_symbol in self.precomputed_symbols:
-            # Convert coeff to complex128 if not already
-            coeff = np.complex128(coeff)
+        if not use_kohn_nirenberg:
+            # Fast path: pure spectral multiplier (no x/y dependence)
+            u_hat = self.fft(u)
+            combined_symbol = np.zeros_like(u_hat, dtype=np.complex128)
+            for coeff, precomputed_symbol in self.precomputed_symbols:
+                coeff = np.complex128(coeff)
+                symbol = np.array(precomputed_symbol, dtype=np.complex128)
+                combined_symbol += coeff * symbol
+            u_hat *= np.exp(-self.dt * combined_symbol)
+            u_hat *= self.dealiasing_mask
+            return self.ifft(u_hat)
     
-            # Ensure symbol is complex128
-            symbol = np.array(precomputed_symbol, dtype=np.complex128)
+        else:
+            # Slow but accurate path: apply Kohn-Nirenberg quantization
+            def build_symbol_func(symbol_expr):
+                if self.dim == 1:
+                    x, xi = symbols('x xi', real=True)
+                    return lambdify((x, xi), symbol_expr, 'numpy')
+                else:
+                    x, y, xi, eta = symbols('x y xi eta', real=True)
+                    return lambdify((x, y, xi, eta), symbol_expr, 'numpy')
     
-            combined_symbol += coeff * symbol
-    
-        # Spectral update
-        u_hat *= np.exp(-self.dt * combined_symbol)
-        u_hat *= self.dealiasing_mask
-    
-        return self.ifft(u_hat)
+            total_symbol = 0
+            for coeff, expr in self.pseudo_terms:
+                total_symbol += coeff * expr
+            symbol_func = build_symbol_func(total_symbol)
+            return self.kohn_nirenberg_fft(f_vals=u, symbol_func=symbol_func)
+
 
     def solve(self):
         """
@@ -1548,8 +1572,7 @@ class PDESolver:
             dky = ky[1] - ky[0]
             u = np.sum(integrand, axis=(2, 3)) * dkx * dky / (2 * np.pi)**2
             return u
-
-            
+           
     def step_ETD_RK4(self, u):
         """
         Perform one ETD-RK4 time step for first-order time PDEs.
