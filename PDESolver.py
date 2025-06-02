@@ -38,6 +38,7 @@ from matplotlib.animation import FuncAnimation
 from IPython.display import HTML
 from functools import partial
 from misc import * 
+from scipy.integrate import solve_ivp
 
 plt.rcParams['text.usetex'] = False
 
@@ -142,7 +143,7 @@ class PseudoDifferentialOperator:
 
         print("\nsymbol = ")
         pprint(expr)
-
+        
     def evaluate(self, X, Y, KX, KY, cache=True):
         """
         Evaluate the symbol on a spatial-frequency grid.
@@ -182,63 +183,99 @@ class PseudoDifferentialOperator:
         """        
         self.symbol_cached = None
 
-    def is_elliptic_numerically(self, x_grid, xi_grid, threshold=1e-8):
+    def principal_symbol(self, order=1):
         """
-        Check if the symbol is elliptic on a grid of (x, xi) or (x, y, xi, eta),
-        with resampling to avoid memory explosion in 2D.
+        Return the homogeneous principal symbol of the operator.
+        
+        Parameters
+        ----------
+        order : int
+            Degree of homogeneity in |ξ| (or (ξ, η)).
+        
+        Returns
+        -------
+        sympy expression
+            Leading homogeneous part of the symbol.
+        """
+        p = self.expr
+        if self.dim == 1:
+            xi = symbols('xi', real=True)
+            return simplify(series(p, xi, oo, n=order).removeO())
+        elif self.dim == 2:
+            xi, eta = symbols('xi eta', real=True)
+            # Expansion radiale homogène : on fixe (ξ, η) = ρ (cosθ, sinθ)
+            rho, theta = symbols('rho theta', real=True)
+            p_rho = p.subs({xi: rho * cos(theta), eta: rho * sin(theta)})
+            expansion = series(p_rho, rho, oo, n=order).removeO()
+            # Revenir à (ξ, η)
+            expansion_cart = expansion.subs({rho: sqrt(xi**2 + eta**2),
+                                             cos(theta): xi / sqrt(xi**2 + eta**2),
+                                             sin(theta): eta / sqrt(xi**2 + eta**2)})
+            return simplify(expansion_cart)
+
+    def asymptotic_expansion(self, order=3):
+        """
+        Asymptotic expansion of the symbol in |ξ| → ∞.
     
         Parameters
         ----------
-        x_grid : ndarray
-            1D or 2D spatial grid (x or (x, y)).
-        xi_grid : ndarray
-            1D or 2D frequency grid (xi or (xi, eta)).
-        threshold : float
-            Minimum allowed magnitude of the symbol.
+        order : int
+            Order up to which the expansion is computed.
     
         Returns
         -------
-        bool
-            True if elliptic on grid, False otherwise.
+        sympy expression
+            Expansion up to order `order` in 1/|ξ|.
         """
-        RESAMPLE_SIZE = 32  # Taille réduite pour éviter l'explosion mémoire
+        p = self.expr
     
         if self.dim == 1:
-            x_vals = x_grid
-            xi_vals = xi_grid
-            # Rééchantillonnage si nécessaire
-            if len(x_vals) > RESAMPLE_SIZE:
-                x_vals = np.linspace(x_vals.min(), x_vals.max(), RESAMPLE_SIZE)
-            if len(xi_vals) > RESAMPLE_SIZE:
-                xi_vals = np.linspace(xi_vals.min(), xi_vals.max(), RESAMPLE_SIZE)
+            xi = symbols('xi', real=True)
     
-            X, XI = np.meshgrid(x_vals, xi_vals, indexing='ij')
-            symbol_vals = self.p_func(X, XI)
+            try:
+                # Cas exp(f(x, xi))
+                if p.func == exp and len(p.args) == 1:
+                    arg = p.args[0]
+                    arg_series = series(arg, xi, oo, n=order).removeO()
+                    # Développer exp(arg_series)
+                    expanded = series(expand(exp(arg_series)), xi, oo, n=order).removeO()
+                    return simplify(expanded)
+                else:
+                    return simplify(series(p, xi, oo, n=order).removeO())
+    
+            except Exception as e:
+                print(f"Warning: expansion failed: {e}")
+                return p
     
         elif self.dim == 2:
-            x_vals, y_vals = x_grid
-            xi_vals, eta_vals = xi_grid
+            xi, eta = symbols('xi eta', real=True)
+            rho, theta = symbols('rho theta', real=True)
+            from sympy import cos, sin, sqrt
     
-            # Rééchantillonnage spatial
-            if len(x_vals) > RESAMPLE_SIZE:
-                x_vals = np.linspace(x_vals.min(), x_vals.max(), RESAMPLE_SIZE)
-            if len(y_vals) > RESAMPLE_SIZE:
-                y_vals = np.linspace(y_vals.min(), y_vals.max(), RESAMPLE_SIZE)
+            # Passer en coordonnées polaires
+            p_rho = p.subs({xi: rho * cos(theta), eta: rho * sin(theta)})
     
-            # Rééchantillonnage fréquentiel
-            if len(xi_vals) > RESAMPLE_SIZE:
-                xi_vals = np.linspace(xi_vals.min(), xi_vals.max(), RESAMPLE_SIZE)
-            if len(eta_vals) > RESAMPLE_SIZE:
-                eta_vals = np.linspace(eta_vals.min(), eta_vals.max(), RESAMPLE_SIZE)
+            try:
+                if p_rho.func == exp and len(p_rho.args) == 1:
+                    arg = p_rho.args[0]
+                    arg_series = series(arg, rho, oo, n=order).removeO()
+                    expanded = series(exp(expand(arg_series)), rho, oo, n=order).removeO()
+                else:
+                    expanded = series(p_rho, rho, oo, n=order).removeO()
     
-            X, Y, XI, ETA = np.meshgrid(x_vals, y_vals, xi_vals, eta_vals, indexing='ij')
-            symbol_vals = self.p_func(X, Y, XI, ETA)
+                # Revenir à (xi, eta)
+                norm = sqrt(xi**2 + eta**2)
+                expansion_cart = expanded.subs({
+                    rho: norm,
+                    cos(theta): xi / norm,
+                    sin(theta): eta / norm
+                })
     
-        else:
-            raise NotImplementedError("Only 1D and 2D supported")
+                return simplify(expansion_cart)
     
-        min_abs_val = np.min(np.abs(symbol_vals))
-        return min_abs_val > threshold
+            except Exception as e:
+                print(f"Warning: 2D expansion failed: {e}")
+                return p
 
     def compose_asymptotic(self, other, order=1):
         """
@@ -335,6 +372,147 @@ class PseudoDifferentialOperator:
                         term += coeff * dL * dp
                 L = L - term * l
         return L
+
+    def formal_adjoint(self):
+        """
+        Compute the formal adjoint of the pseudo-differential operator.
+        
+        Returns
+        -------
+        sympy expression
+            Symbol of the adjoint operator P^*.
+        """
+        p = self.expr
+        if self.dim == 1:
+            x, = self.vars_x
+            xi = symbols('xi', real=True)
+            p_star = conjugate(p)
+            p_star = simplify(series(p_star, xi, oo, n=6).removeO())
+            return p_star
+        elif self.dim == 2:
+            x, y = self.vars_x
+            xi, eta = symbols('xi eta', real=True)
+            p_star = conjugate(p)
+            p_star = simplify(series(p_star, sqrt(xi**2 + eta**2), oo, n=6).removeO())
+            return p_star
+
+    def symplectic_flow(self):
+        """
+        Compute the Hamiltonian vector field of the symbol.
+    
+        Returns
+        -------
+        dict
+            Dictionary with 'dx/dt', 'dξ/dt' (and optionally y, η).
+        """
+        if self.dim == 1:
+            x, = self.vars_x
+            xi = symbols('xi')
+            return {
+                'dx/dt': diff(self.expr, xi),
+                'dxi/dt': -diff(self.expr, x)
+            }
+        elif self.dim == 2:
+            x, y = self.vars_x
+            xi, eta = symbols('xi eta')
+            return {
+                'dx/dt': diff(self.expr, xi),
+                'dy/dt': diff(self.expr, eta),
+                'dxi/dt': -diff(self.expr, x),
+                'deta/dt': -diff(self.expr, y)
+            }
+
+    def is_elliptic_numerically(self, x_grid, xi_grid, threshold=1e-8):
+        """
+        Check if the symbol is elliptic on a grid of (x, xi) or (x, y, xi, eta),
+        with resampling to avoid memory explosion in 2D.
+    
+        Parameters
+        ----------
+        x_grid : ndarray
+            1D or 2D spatial grid (x or (x, y)).
+        xi_grid : ndarray
+            1D or 2D frequency grid (xi or (xi, eta)).
+        threshold : float
+            Minimum allowed magnitude of the symbol.
+    
+        Returns
+        -------
+        bool
+            True if elliptic on grid, False otherwise.
+        """
+        RESAMPLE_SIZE = 32  # Taille réduite pour éviter l'explosion mémoire
+    
+        if self.dim == 1:
+            x_vals = x_grid
+            xi_vals = xi_grid
+            # Rééchantillonnage si nécessaire
+            if len(x_vals) > RESAMPLE_SIZE:
+                x_vals = np.linspace(x_vals.min(), x_vals.max(), RESAMPLE_SIZE)
+            if len(xi_vals) > RESAMPLE_SIZE:
+                xi_vals = np.linspace(xi_vals.min(), xi_vals.max(), RESAMPLE_SIZE)
+    
+            X, XI = np.meshgrid(x_vals, xi_vals, indexing='ij')
+            symbol_vals = self.p_func(X, XI)
+    
+        elif self.dim == 2:
+            x_vals, y_vals = x_grid
+            xi_vals, eta_vals = xi_grid
+    
+            # Rééchantillonnage spatial
+            if len(x_vals) > RESAMPLE_SIZE:
+                x_vals = np.linspace(x_vals.min(), x_vals.max(), RESAMPLE_SIZE)
+            if len(y_vals) > RESAMPLE_SIZE:
+                y_vals = np.linspace(y_vals.min(), y_vals.max(), RESAMPLE_SIZE)
+    
+            # Rééchantillonnage fréquentiel
+            if len(xi_vals) > RESAMPLE_SIZE:
+                xi_vals = np.linspace(xi_vals.min(), xi_vals.max(), RESAMPLE_SIZE)
+            if len(eta_vals) > RESAMPLE_SIZE:
+                eta_vals = np.linspace(eta_vals.min(), eta_vals.max(), RESAMPLE_SIZE)
+    
+            X, Y, XI, ETA = np.meshgrid(x_vals, y_vals, xi_vals, eta_vals, indexing='ij')
+            symbol_vals = self.p_func(X, Y, XI, ETA)
+    
+        else:
+            raise NotImplementedError("Only 1D and 2D supported")
+    
+        min_abs_val = np.min(np.abs(symbol_vals))
+        return min_abs_val > threshold
+
+    def is_self_adjoint(self, tol=1e-10):
+        """
+        Check whether the operator is formally self-adjoint.
+    
+        Returns
+        -------
+        bool
+        """
+        p = self.expr
+        p_star = self.formal_adjoint()
+        return simplify(p - p_star).equals(0)
+
+    def is_homogeneous(self, degree):
+        """
+        Check whether the symbol is homogeneous of a given degree in (ξ, η).
+    
+        Parameters
+        ----------
+        degree : int or float
+    
+        Returns
+        -------
+        bool
+        """
+        if self.dim == 1:
+            xi = symbols('xi', real=True)
+            scaling = self.expr.subs(xi, symbols('λ') * xi)
+            return simplify(scaling / self.expr - symbols('λ')**degree).equals(0)
+        else:
+            xi, eta = symbols('xi eta', real=True)
+            lam = symbols('λ')
+            scaled = self.expr.subs({xi: lam * xi, eta: lam * eta})
+            return simplify(scaled / self.expr - lam**degree).equals(0)
 
     def visualize_wavefront(self, x_grid, xi_grid, y_grid=None, eta_grid=None, xi0=0.0, eta0=0.0):
         """
@@ -528,6 +706,187 @@ class PseudoDifferentialOperator:
             plt.ylabel('y')
             plt.title(f'Dynamic Wavefront at t={t_grid[0]}')
             plt.show()
+
+    def plot_hamiltonian_flow(self, x0=0.0, xi0=5.0, y0=0.0, eta0=0.0, tmax=1.0, n_steps=100):
+        """
+        Integrate and plot the Hamiltonian flow (bicharacteristics of the symbol).
+    
+        Parameters
+        ----------
+        x0, xi0 : float
+            Initial spatial position and frequency (1D).
+        y0, eta0 : float
+            (2D only) Initial y and η.
+        tmax : float
+            Final integration time.
+        n_steps : int
+            Number of time steps.
+        """
+        from scipy.integrate import solve_ivp
+        import matplotlib.pyplot as plt
+    
+        H = self.symplectic_flow()
+    
+        if self.dim == 1:
+            x, = self.vars_x
+            xi = symbols('xi', real=True)
+    
+            dxdt_expr = simplify(H['dx/dt'])
+            dxidt_expr = simplify(H['dxi/dt'])
+    
+            dxdt = lambdify((x, xi), dxdt_expr, 'numpy')
+            dxidt = lambdify((x, xi), dxidt_expr, 'numpy')
+    
+            def hamilton(t, Y):
+                x, xi = Y
+                return [dxdt(x, xi), dxidt(x, xi)]
+    
+            sol = solve_ivp(hamilton, [0, tmax], [x0, xi0], t_eval=np.linspace(0, tmax, n_steps))
+    
+            plt.plot(sol.y[0], sol.y[1])
+            plt.xlabel("x")
+            plt.ylabel("ξ")
+            plt.title("Hamiltonian Flow in Phase Space (1D)")
+            plt.grid(True)
+            plt.show()
+    
+        elif self.dim == 2:
+            x, y = self.vars_x
+            xi, eta = symbols('xi eta', real=True)
+    
+            dxdt = lambdify((x, y, xi, eta), simplify(H['dx/dt']), 'numpy')
+            dydt = lambdify((x, y, xi, eta), simplify(H['dy/dt']), 'numpy')
+            dxidt = lambdify((x, y, xi, eta), simplify(H['dxi/dt']), 'numpy')
+            detadt = lambdify((x, y, xi, eta), simplify(H['deta/dt']), 'numpy')
+    
+            def hamilton(t, Y):
+                x, y, xi, eta = Y
+                return [
+                    dxdt(x, y, xi, eta),
+                    dydt(x, y, xi, eta),
+                    dxidt(x, y, xi, eta),
+                    detadt(x, y, xi, eta)
+                ]
+    
+            sol = solve_ivp(hamilton, [0, tmax], [x0, y0, xi0, eta0], t_eval=np.linspace(0, tmax, n_steps))
+    
+            x_vals, y_vals, xi_vals, eta_vals = sol.y
+    
+            plt.plot(x_vals, y_vals, label='Position')
+            plt.quiver(x_vals, y_vals, xi_vals, eta_vals, scale=20, width=0.003, alpha=0.5, color='r')
+            plt.xlabel("x")
+            plt.ylabel("y")
+            plt.title("Hamiltonian Flow in Phase Space (2D)")
+            plt.legend()
+            plt.grid(True)
+            plt.show()
+
+    def plot_symplectic_vector_field(self, xlim=(-2, 2), klim=(-5, 5), density=30):
+        """
+        Plot the symplectic (Hamiltonian) vector field (dx/dt, dxi/dt) for the symbol.
+        """
+        x_vals = np.linspace(*xlim, density)
+        xi_vals = np.linspace(*klim, density)
+        X, XI = np.meshgrid(x_vals, xi_vals, indexing='ij')
+
+        if self.dim != 1:
+            raise NotImplementedError("Only 1D version implemented.")
+
+        x, = self.vars_x
+        xi = symbols('xi', real=True)
+        H = self.symplectic_flow()
+        dxdt = lambdify((x, xi), simplify(H['dx/dt']), 'numpy')
+        dxidt = lambdify((x, xi), simplify(H['dxi/dt']), 'numpy')
+
+        U = dxdt(X, XI)
+        V = dxidt(X, XI)
+
+        plt.quiver(X, XI, U, V, scale=10, width=0.005)
+        plt.xlabel('x')
+        plt.ylabel(r'$\xi$')
+        plt.title("Symplectic Vector Field (1D)")
+        plt.grid(True)
+        plt.show()
+
+    def visualize_micro_support(self, xlim=(-2, 2), klim=(-10, 10), threshold=1e-3, density=300):
+        """
+        Visualize the micro-support: region in (x, ξ) where |symbol(x, ξ)| is small.
+        """
+        if self.dim != 1:
+            raise NotImplementedError("Only 1D micro-support visualization implemented.")
+
+        x_vals = np.linspace(*xlim, density)
+        xi_vals = np.linspace(*klim, density)
+        X, XI = np.meshgrid(x_vals, xi_vals, indexing='ij')
+        Z = np.abs(self.p_func(X, XI))
+
+        plt.contourf(X, XI, 1 / (Z + 1e-10), levels=100, cmap='inferno')
+        plt.colorbar(label=r'$1/|p(x,\xi)|$')
+        plt.xlabel('x')
+        plt.ylabel(r'$\xi$')
+        plt.title("Micro-Support Estimate (1/|Symbol|)")
+        plt.show()
+
+    def group_velocity_field(self, xlim=(-2, 2), klim=(-10, 10), density=30):
+        """
+        Plot group velocity vector field \nabla_ξ p(x, ξ).
+        """
+        if self.dim != 1:
+            raise NotImplementedError("Only 1D group velocity visualization implemented.")
+
+        x, = self.vars_x
+        xi = symbols('xi', real=True)
+        dp_dxi = diff(self.expr, xi)
+        grad_func = lambdify((x, xi), dp_dxi, 'numpy')
+
+        x_vals = np.linspace(*xlim, density)
+        xi_vals = np.linspace(*klim, density)
+        X, XI = np.meshgrid(x_vals, xi_vals, indexing='ij')
+        V = grad_func(X, XI)
+
+        plt.quiver(X, XI, np.ones_like(V), V, scale=10, width=0.004)
+        plt.xlabel('x')
+        plt.ylabel(r'$\xi$')
+        plt.title("Group Velocity Field (1D)")
+        plt.grid(True)
+        plt.show()
+
+    def animate_singularity(self, xi0=5.0, tmax=4.0, n_frames=100):
+        """
+        Animate the motion of a singularity under the Hamiltonian flow.
+        """
+        if self.dim != 1:
+            raise NotImplementedError("Only 1D animation implemented.")
+
+        x, = self.vars_x
+        xi = symbols('xi', real=True)
+        H = self.symplectic_flow()
+        dxdt = lambdify((x, xi), simplify(H['dx/dt']), 'numpy')
+        dxidt = lambdify((x, xi), simplify(H['dxi/dt']), 'numpy')
+
+        def hamilton(t, Y):
+            x, xi = Y
+            return [dxdt(x, xi), dxidt(x, xi)]
+
+        sol = solve_ivp(hamilton, [0, tmax], [0.0, xi0], t_eval=np.linspace(0, tmax, n_frames))
+
+        import matplotlib.animation as animation
+
+        fig, ax = plt.subplots()
+        ax.set_xlim(-tmax, tmax)
+        ax.set_ylim(xi0 - 2, xi0 + 2)
+        point, = ax.plot([], [], 'ro')
+
+        def update(i):
+            point.set_data(sol.y[0, i], sol.y[1, i])
+            return point,
+
+        ani = animation.FuncAnimation(fig, update, frames=n_frames, interval=50)
+        plt.xlabel('x')
+        plt.ylabel(r'$\xi$')
+        plt.title("Propagation of a Singularity (1D)")
+        plt.grid(True)
+        plt.show()
 
 
 class PDESolver:
@@ -1116,6 +1475,13 @@ class PDESolver:
             fused.visualize_phase(xg, kg)
             fused.visualize_characteristic_set(xg, kg)
             fused.visualize_dynamic_wavefront(xg, np.linspace(0, self.Lt, 100), xi0=xi0)
+            try:
+                fused.plot_hamiltonian_flow(x0=0.0, xi0=xi0, tmax=1.0, n_steps=100)
+            except Exception as e:
+                print(f"Error in plot_hamiltonian_flow: {e}")
+            fused.plot_symplectic_vector_field(xlim=(-2, 2), klim=(-5, 5), density=30)
+            fused.visualize_micro_support(xlim=(-2, 2), klim=(-10, 10), threshold=1e-3, density=300)
+            fused.group_velocity_field(xlim=(-2, 2), klim=(-10, 10), density=30)
     
         elif self.dim == 2:
             fused = PseudoDifferentialOperator(total_expr, [x, y], mode='symbol')
@@ -1128,6 +1494,7 @@ class PDESolver:
             fused.visualize_phase(xg, kx, yg, self.ky, xi0=xi0, eta0=eta0)
             fused.visualize_characteristic_set(xg, kx, x0=0.0, y0=0.0)
             fused.visualize_dynamic_wavefront(xg, np.linspace(0, self.Lt, 100), yg, xi0=xi0, eta0=eta0)
+            fused.plot_hamiltonian_flow(x0=0.0, xi0=xi0, y0=0.0, eta0=eta0, tmax=1.0, n_steps=100)
 
             
     def apply_boundary(self, u):
@@ -1502,75 +1869,139 @@ class PDESolver:
         self.u = u
         return u
 
-    def kohn_nirenberg_fft(self, f_vals, symbol_func):
+    def kohn_nirenberg_fft(self, f_vals, symbol_func,
+                           freq_window='gaussian', clamp=1e6,
+                           space_window=False):
         """
-        Kohn-Nirenberg quantization applying Op(p)[u] using existing solver attributes.
+        Numerically stable Kohn–Nirenberg quantization of a pseudo-differential operator.
     
         Parameters
         ----------
         f_vals : np.ndarray
-            Input spatial function values on the solver grid.
+            Spatial samples of the input function f(x) or f(x, y).
         symbol_func : callable
-            Symbol function p(x, xi) or p(x, y, xi, eta).
+            Symbol function p(x, ξ) in 1D or p(x, y, ξ, η) in 2D.
+            Must be a NumPy-compatible function (e.g., via lambdify).
+        freq_window : {'gaussian', 'hann', None}, optional
+            Type of frequency-domain window to apply to smooth out oscillations and suppress aliasing.
+        clamp : float, optional
+            Maximum absolute value allowed for the symbol. Helps prevent numerical blow-up.
+        space_window : bool, optional
+            Whether to apply a spatial Gaussian window to regularize edge behavior.
     
         Returns
         -------
-        u : np.ndarray
-            Transformed function as Op(p)[f_vals].
+        np.ndarray
+            Output array corresponding to Op(p)[f], same shape as f_vals.
         """
-        # Determine dimension and grid spacing
+    
+        # === Common setup ===
         xg = self.x_grid
         dx = xg[1] - xg[0]
     
         if self.dim == 1:
-            # Use precomputed frequency grid
-            k = 2 * np.pi * np.fft.fftshift(np.fft.fftfreq(self.Nx, d=dx))
+            # === 1D case ===
+    
+            # Frequency grid (shifted to center zero)
+            Nx = self.Nx
+            k = 2 * np.pi * np.fft.fftshift(np.fft.fftfreq(Nx, d=dx))
             dk = k[1] - k[0]
     
-            # Shift input for centered FFT
+            # Centered FFT of input
             f_shift = np.fft.ifftshift(f_vals)
             f_hat = self.fft(f_shift) * dx
             f_hat = np.fft.fftshift(f_hat)
     
-            # Build meshgrid (x, k)
+            # Build meshgrid for (x, ξ)
             X, K = np.meshgrid(xg, k, indexing='ij')
     
-            # Evaluate symbol and apply spectral taper
+            # Evaluate the symbol p(x, ξ)
             P = symbol_func(X, K)
-            P *= np.exp(- (K / K.max())**4)
     
-            # Compute integrand and integrate over frequency
-            integrand = P * f_hat[None, :] * np.exp(1j * X * K)
-            u = integrand.sum(axis=1) * dk / (2 * np.pi)
+            # Optional: clamp extreme values
+            P = np.clip(P, -clamp, clamp)
+    
+            # === Frequency-domain window ===
+            if freq_window == 'gaussian':
+                sigma = 0.8 * np.max(np.abs(k))
+                W = np.exp(-(K / sigma) ** 4)
+                P *= W
+            elif freq_window == 'hann':
+                W = 0.5 * (1 + np.cos(np.pi * K / np.max(np.abs(K))))
+                P *= W * (np.abs(K) < np.max(np.abs(K)))
+    
+            # === Optional spatial window ===
+            if space_window:
+                x0 = (xg[0] + xg[-1]) / 2
+                L = (xg[-1] - xg[0]) / 2
+                S = np.exp(-((X - x0) / L) ** 2)
+                P *= S
+    
+            # === Oscillatory kernel and integration ===
+            kernel = np.exp(1j * X * K)
+            integrand = P * f_hat[None, :] * kernel
+    
+            # Approximate inverse Fourier integral
+            u = np.sum(integrand, axis=1) * dk / (2 * np.pi)
             return u
     
         else:
-            # 2D solver attributes
+            # === 2D case ===
+    
             yg = self.y_grid
             dy = yg[1] - yg[0]
-            kx = 2 * np.pi * np.fft.fftfreq(self.Nx, d=dx)
-            ky = 2 * np.pi * np.fft.fftfreq(self.Ny, d=dy)
+            Nx, Ny = self.Nx, self.Ny
     
-            # 2D FFT of f_vals
-            f_hat = self.fft(f_vals) * dx * dy
+            # Frequency grids
+            kx = 2 * np.pi * np.fft.fftshift(np.fft.fftfreq(Nx, d=dx))
+            ky = 2 * np.pi * np.fft.fftshift(np.fft.fftfreq(Ny, d=dy))
+            dkx = kx[1] - kx[0]
+            dky = ky[1] - ky[0]
     
-            # Create broadcasted grids
-            X, Y = np.meshgrid(xg, yg, indexing='ij')
+            # 2D FFT of f(x, y)
+            f_hat = np.fft.fftshift(self.fft(f_vals)) * dx * dy
+    
+            # Create 4D grids for broadcasting
+            X, Y = np.meshgrid(self.x_grid, self.y_grid, indexing='ij')
             KX, KY = np.meshgrid(kx, ky, indexing='ij')
             Xb = X[:, :, None, None]
             Yb = Y[:, :, None, None]
             KXb = KX[None, None, :, :]
             KYb = KY[None, None, :, :]
     
-            # Evaluate symbol and kernel
+            # Evaluate p(x, y, ξ, η)
             P_vals = symbol_func(Xb, Yb, KXb, KYb)
-            phase = np.exp(1j * (Xb * KXb + Yb * KYb))
+            P_vals = np.clip(P_vals, -clamp, clamp)
     
-            # Integrate over frequency dimensions
+            # === Frequency windowing ===
+            if freq_window == 'gaussian':
+                sigma_kx = 0.8 * np.max(np.abs(kx))
+                sigma_ky = 0.8 * np.max(np.abs(ky))
+                W_kx = np.exp(-(KXb / sigma_kx) ** 4)
+                W_ky = np.exp(-(KYb / sigma_ky) ** 4)
+                P_vals *= W_kx * W_ky
+            elif freq_window == 'hann':
+                Wx = 0.5 * (1 + np.cos(np.pi * KXb / np.max(np.abs(kx))))
+                Wy = 0.5 * (1 + np.cos(np.pi * KYb / np.max(np.abs(ky))))
+                mask_x = np.abs(KXb) < np.max(np.abs(kx))
+                mask_y = np.abs(KYb) < np.max(np.abs(ky))
+                P_vals *= Wx * Wy * mask_x * mask_y
+    
+            # === Optional spatial tapering ===
+            if space_window:
+                x0 = (self.x_grid[0] + self.x_grid[-1]) / 2
+                y0 = (self.y_grid[0] + self.y_grid[-1]) / 2
+                Lx = (self.x_grid[-1] - self.x_grid[0]) / 2
+                Ly = (self.y_grid[-1] - self.y_grid[0]) / 2
+                S = np.exp(-((Xb - x0) / Lx) ** 2 - ((Yb - y0) / Ly) ** 2)
+                P_vals *= S
+    
+            # === Oscillatory kernel and integration ===
+            phase = np.exp(1j * (Xb * KXb + Yb * KYb))
             integrand = P_vals * phase * f_hat[None, None, :, :]
-            dkx = kx[1] - kx[0]
-            dky = ky[1] - ky[0]
-            u = np.sum(integrand, axis=(2, 3)) * dkx * dky / (2 * np.pi)**2
+    
+            # 2D Fourier inversion (numerical integration)
+            u = np.sum(integrand, axis=(2, 3)) * dkx * dky / (2 * np.pi) ** 2
             return u
            
     def step_ETD_RK4(self, u):

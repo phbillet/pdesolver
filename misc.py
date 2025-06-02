@@ -1,3 +1,5 @@
+import numpy as np
+
 # Miscellaneous functions
 
 def gaussian_function_1D(x, center, sigma):
