@@ -39,6 +39,9 @@ from IPython.display import HTML
 from functools import partial
 from misc import * 
 from scipy.integrate import solve_ivp
+from IPython.display import display
+from ipywidgets import interact, FloatSlider, Dropdown
+
 
 plt.rcParams['text.usetex'] = False
 
@@ -212,6 +215,69 @@ class PseudoDifferentialOperator:
                                              cos(theta): xi / sqrt(xi**2 + eta**2),
                                              sin(theta): eta / sqrt(xi**2 + eta**2)})
             return simplify(expansion_cart)
+            
+    def symbol_order(self, max_order=10, tol=1e-3):
+        """
+        Estimate the order (degree of homogeneity) of the pseudo-differential symbol.
+    
+        Parameters
+        ----------
+        max_order : int
+            Maximum order to test.
+        tol : float
+            Tolerance for considering a term non-zero.
+    
+        Returns
+        -------
+        int or None
+            Estimated order (homogeneity degree), or None if not determined.
+        """
+        from sympy import symbols, simplify, series, oo, sqrt, cos, sin, expand
+    
+        p = self.expr
+    
+        if self.dim == 1:
+            xi = symbols('xi', real=True)
+            try:
+                s = simplify(series(p, xi, oo, n=max_order).removeO())
+                terms = s.as_ordered_terms()
+                for term in reversed(terms):
+                    poly = term.as_poly(xi)
+                    if poly is None:
+                        continue
+                    degree = poly.degree()
+                    coeff = poly.coeff_monomial(xi**degree)
+                    if coeff.free_symbols:
+                        continue  # dépend encore de x, on ignore
+                    if abs(float(coeff.evalf())) > tol:
+                        return degree
+            except Exception as e:
+                print(f"Order estimation failed: {e}")
+            return None
+    
+        elif self.dim == 2:
+            xi, eta = symbols('xi eta', real=True)
+            rho, theta = symbols('rho theta', real=True)
+            try:
+                p_rho = p.subs({xi: rho * cos(theta), eta: rho * sin(theta)})
+                s = simplify(series(p_rho, rho, oo, n=max_order).removeO())
+                terms = s.as_ordered_terms()
+                for term in reversed(terms):
+                    poly = term.as_poly(rho)
+                    if poly is None:
+                        continue
+                    degree = poly.degree()
+                    coeff = poly.coeff_monomial(rho**degree)
+                    if coeff.free_symbols:
+                        continue
+                    if abs(float(coeff.evalf())) > tol:
+                        return degree
+            except Exception as e:
+                print(f"2D Order estimation failed: {e}")
+            return None
+    
+        else:
+            raise NotImplementedError("Only 1D and 2D are supported.")
 
     def asymptotic_expansion(self, order=3):
         """
@@ -724,15 +790,23 @@ class PseudoDifferentialOperator:
         """
         from scipy.integrate import solve_ivp
         import matplotlib.pyplot as plt
+        from sympy import simplify, symbols, lambdify, im
+    
+        def make_real(expr):
+            """Return the real part of an expression (if complex)."""
+            return simplify(expr.as_real_imag()[0])
     
         H = self.symplectic_flow()
+    
+        if any(im(H[k]) != 0 for k in H):
+            print("⚠️ The Hamiltonian field is complex. Only the real part is used for integration.")
     
         if self.dim == 1:
             x, = self.vars_x
             xi = symbols('xi', real=True)
     
-            dxdt_expr = simplify(H['dx/dt'])
-            dxidt_expr = simplify(H['dxi/dt'])
+            dxdt_expr = make_real(H['dx/dt'])
+            dxidt_expr = make_real(H['dxi/dt'])
     
             dxdt = lambdify((x, xi), dxdt_expr, 'numpy')
             dxidt = lambdify((x, xi), dxidt_expr, 'numpy')
@@ -742,8 +816,9 @@ class PseudoDifferentialOperator:
                 return [dxdt(x, xi), dxidt(x, xi)]
     
             sol = solve_ivp(hamilton, [0, tmax], [x0, xi0], t_eval=np.linspace(0, tmax, n_steps))
+            x_vals, xi_vals = sol.y
     
-            plt.plot(sol.y[0], sol.y[1])
+            plt.plot(x_vals, xi_vals)
             plt.xlabel("x")
             plt.ylabel("ξ")
             plt.title("Hamiltonian Flow in Phase Space (1D)")
@@ -754,10 +829,10 @@ class PseudoDifferentialOperator:
             x, y = self.vars_x
             xi, eta = symbols('xi eta', real=True)
     
-            dxdt = lambdify((x, y, xi, eta), simplify(H['dx/dt']), 'numpy')
-            dydt = lambdify((x, y, xi, eta), simplify(H['dy/dt']), 'numpy')
-            dxidt = lambdify((x, y, xi, eta), simplify(H['dxi/dt']), 'numpy')
-            detadt = lambdify((x, y, xi, eta), simplify(H['deta/dt']), 'numpy')
+            dxdt = lambdify((x, y, xi, eta), make_real(H['dx/dt']), 'numpy')
+            dydt = lambdify((x, y, xi, eta), make_real(H['dy/dt']), 'numpy')
+            dxidt = lambdify((x, y, xi, eta), make_real(H['dxi/dt']), 'numpy')
+            detadt = lambdify((x, y, xi, eta), make_real(H['deta/dt']), 'numpy')
     
             def hamilton(t, Y):
                 x, y, xi, eta = Y
@@ -769,7 +844,6 @@ class PseudoDifferentialOperator:
                 ]
     
             sol = solve_ivp(hamilton, [0, tmax], [x0, y0, xi0, eta0], t_eval=np.linspace(0, tmax, n_steps))
-    
             x_vals, y_vals, xi_vals, eta_vals = sol.y
     
             plt.plot(x_vals, y_vals, label='Position')
@@ -779,7 +853,9 @@ class PseudoDifferentialOperator:
             plt.title("Hamiltonian Flow in Phase Space (2D)")
             plt.legend()
             plt.grid(True)
+            plt.axis('equal')
             plt.show()
+
 
     def plot_symplectic_vector_field(self, xlim=(-2, 2), klim=(-5, 5), density=30):
         """
@@ -851,43 +927,319 @@ class PseudoDifferentialOperator:
         plt.grid(True)
         plt.show()
 
-    def animate_singularity(self, xi0=5.0, tmax=4.0, n_frames=100):
+    def animate_singularity(self, xi0=5.0, eta0=0.0, tmax=4.0, n_frames=20, projection=None):
         """
         Animate the motion of a singularity under the Hamiltonian flow.
+    
+        Parameters
+        ----------
+        xi0, eta0 : float
+            Initial frequency values (eta0 ignored in 1D)
+        tmax : float
+            Total time of animation
+        n_frames : int
+            Number of frames in animation
+        projection : str or None
+            'position'   → show (x, y)
+            'frequency'  → show (xi, eta)
+            'phase'      → show (x, xi) or (x, eta)
+            None         → default: 'phase' in 1D, 'position' in 2D
+    
+        Returns
+        -------
+        matplotlib.animation.FuncAnimation
+            Animation object for inline display
         """
-        if self.dim != 1:
-            raise NotImplementedError("Only 1D animation implemented.")
-
-        x, = self.vars_x
-        xi = symbols('xi', real=True)
-        H = self.symplectic_flow()
-        dxdt = lambdify((x, xi), simplify(H['dx/dt']), 'numpy')
-        dxidt = lambdify((x, xi), simplify(H['dxi/dt']), 'numpy')
-
-        def hamilton(t, Y):
-            x, xi = Y
-            return [dxdt(x, xi), dxidt(x, xi)]
-
-        sol = solve_ivp(hamilton, [0, tmax], [0.0, xi0], t_eval=np.linspace(0, tmax, n_frames))
-
+        from scipy.integrate import solve_ivp
+        import matplotlib.pyplot as plt
         import matplotlib.animation as animation
+        from matplotlib import rc
+        from sympy import simplify, symbols, lambdify, im
+    
+        rc('animation', html='jshtml')
+    
+        def make_real(expr):
+            return simplify(expr.as_real_imag()[0])
+    
+        H = self.symplectic_flow()
+    
+        if any(im(H[k]) != 0 for k in H):
+            print("⚠️  The Hamiltonian field is complex. Only the real part is used for integration.")
+    
+        if self.dim == 1:
+            x, = self.vars_x
+            xi = symbols('xi', real=True)
+    
+            dxdt = lambdify((x, xi), make_real(H['dx/dt']), 'numpy')
+            dxidt = lambdify((x, xi), make_real(H['dxi/dt']), 'numpy')
+    
+            def hamilton(t, Y):
+                x, xi = Y
+                return [dxdt(x, xi), dxidt(x, xi)]
+    
+            sol = solve_ivp(hamilton, [0, tmax], [0.0, xi0], t_eval=np.linspace(0, tmax, n_frames))
+            x_vals, xi_vals = sol.y
+    
+            if projection is None:
+                projection = 'phase'
+    
+            fig, ax = plt.subplots()
+            point, = ax.plot([], [], 'ro')
+            traj, = ax.plot([], [], 'b--', lw=1, alpha=0.5)
+    
+            if projection == 'phase':
+                ax.set_xlabel('x')
+                ax.set_ylabel(r'$\xi$')
+                ax.set_xlim(np.min(x_vals) - 1, np.max(x_vals) + 1)
+                ax.set_ylim(np.min(xi_vals) - 1, np.max(xi_vals) + 1)
+    
+                def update(i):
+                    point.set_data([x_vals[i]], [xi_vals[i]])
+                    traj.set_data(x_vals[:i+1], xi_vals[:i+1])
+                    return point, traj
+    
+            elif projection == 'position':
+                ax.set_xlabel('x')
+                ax.set_ylabel('x')
+                ax.set_xlim(np.min(x_vals) - 1, np.max(x_vals) + 1)
+                ax.set_ylim(np.min(x_vals) - 1, np.max(x_vals) + 1)
+    
+                def update(i):
+                    point.set_data([x_vals[i]], [x_vals[i]])
+                    traj.set_data(x_vals[:i+1], x_vals[:i+1])
+                    return point, traj
+    
+            elif projection == 'frequency':
+                ax.set_xlabel(r'$\xi$')
+                ax.set_ylabel(r'$\xi$')
+                ax.set_xlim(np.min(xi_vals) - 1, np.max(xi_vals) + 1)
+                ax.set_ylim(np.min(xi_vals) - 1, np.max(xi_vals) + 1)
+    
+                def update(i):
+                    point.set_data([xi_vals[i]], [xi_vals[i]])
+                    traj.set_data(xi_vals[:i+1], xi_vals[:i+1])
+                    return point, traj
+    
+            else:
+                raise ValueError("Invalid projection mode")
+    
+            ax.set_title(f"1D Singularity Flow ({projection})")
+            ax.grid(True)
+            ani = animation.FuncAnimation(fig, update, frames=n_frames, interval=50)
+            plt.close(fig)
+            return ani
+    
+        elif self.dim == 2:
+            x, y = self.vars_x
+            xi, eta = symbols('xi eta', real=True)
+    
+            dxdt = lambdify((x, y, xi, eta), make_real(H['dx/dt']), 'numpy')
+            dydt = lambdify((x, y, xi, eta), make_real(H['dy/dt']), 'numpy')
+            dxidt = lambdify((x, y, xi, eta), make_real(H['dxi/dt']), 'numpy')
+            detadt = lambdify((x, y, xi, eta), make_real(H['deta/dt']), 'numpy')
+    
+            def hamilton(t, Y):
+                x, y, xi, eta = Y
+                return [
+                    dxdt(x, y, xi, eta),
+                    dydt(x, y, xi, eta),
+                    dxidt(x, y, xi, eta),
+                    detadt(x, y, xi, eta)
+                ]
+    
+            sol = solve_ivp(hamilton, [0, tmax], [0.0, 0.0, xi0, eta0], t_eval=np.linspace(0, tmax, n_frames))
+            x_vals, y_vals, xi_vals, eta_vals = sol.y
+    
+            if projection is None:
+                projection = 'position'
+    
+            fig, ax = plt.subplots()
+            point, = ax.plot([], [], 'ro')
+            traj, = ax.plot([], [], 'b--', lw=1, alpha=0.5)
+    
+            if projection == 'position':
+                ax.set_xlabel('x')
+                ax.set_ylabel('y')
+                ax.set_xlim(np.min(x_vals) - 1, np.max(x_vals) + 1)
+                ax.set_ylim(np.min(y_vals) - 1, np.max(y_vals) + 1)
+    
+                def update(i):
+                    point.set_data([x_vals[i]], [y_vals[i]])
+                    traj.set_data(x_vals[:i+1], y_vals[:i+1])
+                    return point, traj
+    
+            elif projection == 'frequency':
+                ax.set_xlabel(r'$\xi$')
+                ax.set_ylabel(r'$\eta$')
+                ax.set_xlim(np.min(xi_vals) - 1, np.max(xi_vals) + 1)
+                ax.set_ylim(np.min(eta_vals) - 1, np.max(eta_vals) + 1)
+    
+                def update(i):
+                    point.set_data([xi_vals[i]], [eta_vals[i]])
+                    traj.set_data(xi_vals[:i+1], eta_vals[:i+1])
+                    return point, traj
+    
+            elif projection == 'phase':
+                ax.set_xlabel('x')
+                ax.set_ylabel(r'$\eta$')
+                ax.set_xlim(np.min(x_vals) - 1, np.max(x_vals) + 1)
+                ax.set_ylim(np.min(eta_vals) - 1, np.max(eta_vals) + 1)
+    
+                def update(i):
+                    point.set_data([x_vals[i]], [eta_vals[i]])
+                    traj.set_data(x_vals[:i+1], eta_vals[:i+1])
+                    return point, traj
+    
+            else:
+                raise ValueError("Invalid projection mode")
+    
+            ax.set_title(f"2D Singularity Flow ({projection})")
+            ax.grid(True)
+            ax.axis('equal')
+            ani = animation.FuncAnimation(fig, update, frames=n_frames, interval=50)
+            plt.close(fig)
+            return ani
 
-        fig, ax = plt.subplots()
-        ax.set_xlim(-tmax, tmax)
-        ax.set_ylim(xi0 - 2, xi0 + 2)
-        point, = ax.plot([], [], 'ro')
-
-        def update(i):
-            point.set_data(sol.y[0, i], sol.y[1, i])
-            return point,
-
-        ani = animation.FuncAnimation(fig, update, frames=n_frames, interval=50)
-        plt.xlabel('x')
-        plt.ylabel(r'$\xi$')
-        plt.title("Propagation of a Singularity (1D)")
-        plt.grid(True)
-        plt.show()
-
+    def interactive_symbol_analysis(pseudo_op,
+                                    xlim=(-2, 2), ylim=(-2, 2),
+                                    xi_range=(0.1, 5), eta_range=(-5, 5),
+                                    density=100):
+        dim = pseudo_op.dim
+        expr = pseudo_op.expr
+        vars_x = pseudo_op.vars_x
+    
+        mode_selector = Dropdown(
+            options=[
+                'Group Velocity Field',
+                'Micro-Support (1/|p|)',
+                'Symplectic Vector Field',
+                'Symbol Amplitude',
+                'Symbol Phase',
+                'Cotangent Fiber',
+                'Characteristic Set',
+                'Wavefront Set',
+                'Hamiltonian Flow',
+            ],
+            value='Group Velocity Field',
+            description='Mode:'
+        )
+    
+        x_vals = np.linspace(*xlim, density)
+        if dim == 2:
+            y_vals = np.linspace(*ylim, density)
+    
+        if dim == 1:
+            x, = vars_x
+            xi = symbols('xi', real=True)
+            grad_func = lambdify((x, xi), diff(expr, xi), 'numpy')
+            symplectic_func = lambdify((x, xi), [diff(expr, xi), -diff(expr, x)], 'numpy')
+            symbol_func = lambdify((x, xi), expr, 'numpy')
+    
+            def plot_1d(mode, xi0, x0):
+                X = x_vals[:, None]
+    
+                if mode == 'Group Velocity Field':
+                    V = grad_func(X, xi0)
+                    plt.quiver(X, V, np.ones_like(V), V, scale=10, width=0.004)
+                    plt.title(f'Group Velocity Field at ξ={xi0:.2f}')
+    
+                elif mode == 'Micro-Support (1/|p|)':
+                    Z = 1 / (np.abs(symbol_func(X, xi0)) + 1e-10)
+                    plt.plot(x_vals, Z)
+                    plt.title(f'Micro-Support (1/|p|) at ξ={xi0:.2f}')
+    
+                elif mode == 'Symplectic Vector Field':
+                    U, V = symplectic_func(X, xi0)
+                    plt.quiver(X, V, U, V, scale=10, width=0.004)
+                    plt.title(f'Symplectic Field at ξ={xi0:.2f}')
+    
+                elif mode == 'Symbol Amplitude':
+                    Z = np.abs(symbol_func(X, xi0))
+                    plt.plot(x_vals, Z)
+                    plt.title(f'Symbol Amplitude |p(x,ξ)| at ξ={xi0:.2f}')
+    
+                elif mode == 'Symbol Phase':
+                    Z = np.angle(symbol_func(X, xi0))
+                    plt.plot(x_vals, Z)
+                    plt.title(f'Symbol Phase arg(p(x,ξ)) at ξ={xi0:.2f}')
+    
+                elif mode == 'Cotangent Fiber':
+                    pseudo_op.visualize_fiber(x_vals, np.linspace(*xi_range, density), x0=x0)
+    
+                elif mode == 'Characteristic Set':
+                    pseudo_op.visualize_characteristic_set(x_vals, np.linspace(*xi_range, density), x0=x0)
+    
+                elif mode == 'Wavefront Set':
+                    pseudo_op.visualize_wavefront(x_vals, np.linspace(*xi_range, density), xi0=xi0)
+    
+                elif mode == 'Hamiltonian Flow':
+                    pseudo_op.plot_hamiltonian_flow(x0=x0, xi0=xi0)
+    
+            interact(plot_1d,
+                     mode=mode_selector,
+                     xi0=FloatSlider(min=xi_range[0], max=xi_range[1], step=0.1, value=1.0, description='ξ₀'),
+                     x0=FloatSlider(min=xlim[0], max=xlim[1], step=0.1, value=0.0, description='x₀'))
+    
+        elif dim == 2:
+            x, y = vars_x
+            xi, eta = symbols('xi eta', real=True)
+            grad_func = lambdify((x, y, xi, eta), [diff(expr, xi), diff(expr, eta)], 'numpy')
+            symplectic_func = lambdify((x, y, xi, eta), [diff(expr, xi), diff(expr, eta)], 'numpy')
+            symbol_func = lambdify((x, y, xi, eta), expr, 'numpy')
+    
+            def plot_2d(mode, xi0, eta0, x0, y0):
+                X, Y = np.meshgrid(x_vals, y_vals, indexing='ij')
+    
+                if mode == 'Group Velocity Field':
+                    U, V = grad_func(X, Y, xi0, eta0)
+                    plt.quiver(X, Y, U, V, scale=10, width=0.004)
+                    plt.title(f'Group Velocity Field at ξ={xi0:.2f}, η={eta0:.2f}')
+    
+                elif mode == 'Micro-Support (1/|p|)':
+                    Z = 1 / (np.abs(symbol_func(X, Y, xi0, eta0)) + 1e-10)
+                    plt.pcolormesh(X, Y, Z, shading='auto', cmap='inferno')
+                    plt.colorbar(label='1/|p|')
+                    plt.title(f'Micro-Support at ξ={xi0:.2f}, η={eta0:.2f}')
+    
+                elif mode == 'Symplectic Vector Field':
+                    U, V = symplectic_func(X, Y, xi0, eta0)
+                    plt.quiver(X, Y, U, V, scale=10, width=0.004)
+                    plt.title(f'Symplectic Field at ξ={xi0:.2f}, η={eta0:.2f}')
+    
+                elif mode == 'Symbol Amplitude':
+                    Z = np.abs(symbol_func(X, Y, xi0, eta0))
+                    plt.pcolormesh(X, Y, Z, shading='auto')
+                    plt.colorbar(label='|p(x,y,ξ,η)|')
+                    plt.title(f'Symbol Amplitude at ξ={xi0:.2f}, η={eta0:.2f}')
+    
+                elif mode == 'Symbol Phase':
+                    Z = np.angle(symbol_func(X, Y, xi0, eta0))
+                    plt.pcolormesh(X, Y, Z, shading='auto', cmap='twilight')
+                    plt.colorbar(label='arg(p)')
+                    plt.title(f'Symbol Phase at ξ={xi0:.2f}, η={eta0:.2f}')
+    
+                elif mode == 'Cotangent Fiber':
+                    pseudo_op.visualize_fiber(np.linspace(*xi_range, density), np.linspace(*eta_range, density),
+                                              x0=x0, y0=y0)
+    
+                elif mode == 'Characteristic Set':
+                    pseudo_op.visualize_characteristic_set(np.linspace(*xi_range, density),
+                                                           np.linspace(*eta_range, density),
+                                                           x0=x0, y0=y0)
+    
+                elif mode == 'Wavefront Set':
+                    pseudo_op.visualize_wavefront(x_vals, np.linspace(*xi_range, density),
+                                                  y_grid=y_vals, xi0=xi0, eta0=eta0)
+    
+                elif mode == 'Hamiltonian Flow':
+                    pseudo_op.plot_hamiltonian_flow(x0=x0, y0=y0, xi0=xi0, eta0=eta0)
+                    
+            interact(plot_2d,
+                     mode=mode_selector,
+                     xi0=FloatSlider(min=xi_range[0], max=xi_range[1], step=0.1, value=1.0, description='ξ₀'),
+                     eta0=FloatSlider(min=eta_range[0], max=eta_range[1], step=0.1, value=1.0, description='η₀'),
+                     x0=FloatSlider(min=xlim[0], max=xlim[1], step=0.1, value=0.0, description='x₀'),
+                     y0=FloatSlider(min=ylim[0], max=ylim[1], step=0.1, value=0.0, description='y₀'))
 
 class PDESolver:
     """
@@ -1438,7 +1790,7 @@ class PDESolver:
 
         
         if self.has_psi:
-            self.visualize_total_psi_symbol()
+            print("For psiOp, please use the interactive_symbol_analysis method separately")
         else:
             self.check_cfl_condition()
     
@@ -1448,54 +1800,6 @@ class PDESolver:
     
             if self.temporal_order == 2:
                 self.analyze_wave_propagation()
-
-    def visualize_total_psi_symbol(self, xi0=1.0, eta0=0.0):
-        if not self.has_psi or not hasattr(self, 'psi_ops'):
-            print("No pseudo-differential operator detected.")
-            return
-    
-        # Créer un opérateur factice avec la somme des symboles
-        from sympy import symbols
-        x = self.spatial_vars[0]
-        y = self.spatial_vars[1] if self.dim == 2 else None
-        xi = symbols('xi', real=True)
-        eta = symbols('eta', real=True) if self.dim == 2 else None
-    
-        total_expr = 0
-        for coeff, psi in self.psi_ops:
-            total_expr += coeff * psi.expr  # Accumule l'expression du symbole
-    
-        if self.dim == 1:
-            fused = PseudoDifferentialOperator(total_expr, [x], mode='symbol')
-            xg = self.X
-            kg = self.KX
-            fused.visualize_wavefront(xg, kg)
-            fused.visualize_fiber(xg, kg)
-            fused.visualize_symbol_amplitude(xg, kg)
-            fused.visualize_phase(xg, kg)
-            fused.visualize_characteristic_set(xg, kg)
-            fused.visualize_dynamic_wavefront(xg, np.linspace(0, self.Lt, 100), xi0=xi0)
-            try:
-                fused.plot_hamiltonian_flow(x0=0.0, xi0=xi0, tmax=1.0, n_steps=100)
-            except Exception as e:
-                print(f"Error in plot_hamiltonian_flow: {e}")
-            fused.plot_symplectic_vector_field(xlim=(-2, 2), klim=(-5, 5), density=30)
-            fused.visualize_micro_support(xlim=(-2, 2), klim=(-10, 10), threshold=1e-3, density=300)
-            fused.group_velocity_field(xlim=(-2, 2), klim=(-10, 10), density=30)
-    
-        elif self.dim == 2:
-            fused = PseudoDifferentialOperator(total_expr, [x, y], mode='symbol')
-            xg = self.x_grid
-            yg = self.y_grid
-            kx = self.kx
-            fused.visualize_wavefront(xg, kx, yg, self.ky, xi0=xi0, eta0=eta0)
-            fused.visualize_fiber(xg, kx, x0=0.0, y0=0.0)
-            fused.visualize_symbol_amplitude(xg, kx, yg, self.ky, xi0=xi0, eta0=eta0)
-            fused.visualize_phase(xg, kx, yg, self.ky, xi0=xi0, eta0=eta0)
-            fused.visualize_characteristic_set(xg, kx, x0=0.0, y0=0.0)
-            fused.visualize_dynamic_wavefront(xg, np.linspace(0, self.Lt, 100), yg, xi0=xi0, eta0=eta0)
-            fused.plot_hamiltonian_flow(x0=0.0, xi0=xi0, y0=0.0, eta0=eta0, tmax=1.0, n_steps=100)
-
             
     def apply_boundary(self, u):
         """
