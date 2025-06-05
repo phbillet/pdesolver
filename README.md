@@ -1,5 +1,7 @@
 # PDESolver: A Python Framework for Solving Partial Differential Equations
 
+![Test Notebooks](https://github.com/phbillet/pdesolver/actions/workflows/test-notebooks.yml/badge.svg)
+
 ## Overview
 
 `PDESolver` is a modular Python framework for the numerical solution and analysis of partial differential equations (PDEs) in 1D and 2D. It combines symbolic parsing, pseudo-spectral methods, and support for custom pseudo-differential operators. The framework enables advanced wave analysis, ellipticity diagnostics, and interactive visualizations for symbolic operators.
