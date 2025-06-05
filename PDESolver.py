@@ -14,7 +14,7 @@
 
 import numpy as np
 import matplotlib.pyplot as plt
-from scipy.fft import fft2, ifft2, fft, ifft, fftfreq
+from scipy.fft import fft2, ifft2, fft, ifft, fftfreq, fftshift, ifftshift
 from sympy import (
     symbols, Function, 
     solve, pprint, Mul,
@@ -42,8 +42,8 @@ from scipy.integrate import solve_ivp
 from IPython.display import display
 from ipywidgets import interact, FloatSlider, Dropdown
 
-
 plt.rcParams['text.usetex'] = False
+FFT_WORKERS = 4
 
 class Op(Function):
     """Custom symbolic wrapper for pseudo-differential operators in Fourier space.
@@ -97,7 +97,6 @@ class PseudoDifferentialOperator:
     def __init__(self, expr, vars_x, var_u=None, mode='symbol'):
         self.dim = len(vars_x)
         self.mode = mode
-        self.fft_workers = 4
         self.symbol_cached = None
         self.expr = expr
         self.vars_x = vars_x
@@ -106,8 +105,8 @@ class PseudoDifferentialOperator:
             x, = vars_x
             xi_internal = symbols('xi', real=True)
             expr = expr.subs(symbols('xi', real=True), xi_internal)
-            self.fft = partial(fft, workers=self.fft_workers)
-            self.ifft = partial(ifft, workers=self.fft_workers)
+            self.fft = partial(fft, workers=FFT_WORKERS)
+            self.ifft = partial(ifft, workers=FFT_WORKERS)
 
             if mode == 'symbol':
                 self.p_func = lambdify((x, xi_internal), expr, 'numpy')
@@ -126,8 +125,8 @@ class PseudoDifferentialOperator:
             xi_internal, eta_internal = symbols('xi eta', real=True)
             expr = expr.subs(symbols('xi', real=True), xi_internal)
             expr = expr.subs(symbols('eta', real=True), eta_internal)
-            self.fft = partial(fft2, workers=self.fft_workers)
-            self.ifft = partial(ifft2, workers=self.fft_workers)
+            self.fft = partial(fft2, workers=FFT_WORKERS)
+            self.ifft = partial(ifft2, workers=FFT_WORKERS)
 
             if mode == 'symbol':
                 self.p_func = lambdify((x, y, xi_internal, eta_internal), expr, 'numpy')
@@ -206,15 +205,16 @@ class PseudoDifferentialOperator:
             return simplify(series(p, xi, oo, n=order).removeO())
         elif self.dim == 2:
             xi, eta = symbols('xi eta', real=True)
-            # Expansion radiale homogène : on fixe (ξ, η) = ρ (cosθ, sinθ)
+            # Homogeneous radial expansion: we set (ξ, η) = ρ (cosθ, sinθ)
             rho, theta = symbols('rho theta', real=True)
             p_rho = p.subs({xi: rho * cos(theta), eta: rho * sin(theta)})
             expansion = series(p_rho, rho, oo, n=order).removeO()
-            # Revenir à (ξ, η)
+            # Revert back to (ξ, η)
             expansion_cart = expansion.subs({rho: sqrt(xi**2 + eta**2),
                                              cos(theta): xi / sqrt(xi**2 + eta**2),
                                              sin(theta): eta / sqrt(xi**2 + eta**2)})
             return simplify(expansion_cart)
+
             
     def symbol_order(self, max_order=10, tol=1e-3):
         """
@@ -233,9 +233,9 @@ class PseudoDifferentialOperator:
             Estimated order (homogeneity degree), or None if not determined.
         """
         from sympy import symbols, simplify, series, oo, sqrt, cos, sin, expand
-    
+        
         p = self.expr
-    
+        
         if self.dim == 1:
             xi = symbols('xi', real=True)
             try:
@@ -248,13 +248,13 @@ class PseudoDifferentialOperator:
                     degree = poly.degree()
                     coeff = poly.coeff_monomial(xi**degree)
                     if coeff.free_symbols:
-                        continue  # dépend encore de x, on ignore
+                        continue  # still depends on x, we ignore
                     if abs(float(coeff.evalf())) > tol:
                         return degree
             except Exception as e:
                 print(f"Order estimation failed: {e}")
             return None
-    
+        
         elif self.dim == 2:
             xi, eta = symbols('xi eta', real=True)
             rho, theta = symbols('rho theta', real=True)
@@ -275,9 +275,10 @@ class PseudoDifferentialOperator:
             except Exception as e:
                 print(f"2D Order estimation failed: {e}")
             return None
-    
+        
         else:
             raise NotImplementedError("Only 1D and 2D are supported.")
+
 
     def asymptotic_expansion(self, order=3):
         """
@@ -294,33 +295,33 @@ class PseudoDifferentialOperator:
             Expansion up to order `order` in 1/|ξ|.
         """
         p = self.expr
-    
+        
         if self.dim == 1:
             xi = symbols('xi', real=True)
-    
+        
             try:
-                # Cas exp(f(x, xi))
+                # Case exp(f(x, xi))
                 if p.func == exp and len(p.args) == 1:
                     arg = p.args[0]
                     arg_series = series(arg, xi, oo, n=order).removeO()
-                    # Développer exp(arg_series)
+                    # Expand exp(arg_series)
                     expanded = series(expand(exp(arg_series)), xi, oo, n=order).removeO()
                     return simplify(expanded)
                 else:
                     return simplify(series(p, xi, oo, n=order).removeO())
-    
+        
             except Exception as e:
                 print(f"Warning: expansion failed: {e}")
                 return p
-    
+        
         elif self.dim == 2:
             xi, eta = symbols('xi eta', real=True)
             rho, theta = symbols('rho theta', real=True)
             from sympy import cos, sin, sqrt
-    
-            # Passer en coordonnées polaires
+        
+            # Switch to polar coordinates
             p_rho = p.subs({xi: rho * cos(theta), eta: rho * sin(theta)})
-    
+        
             try:
                 if p_rho.func == exp and len(p_rho.args) == 1:
                     arg = p_rho.args[0]
@@ -328,20 +329,21 @@ class PseudoDifferentialOperator:
                     expanded = series(exp(expand(arg_series)), rho, oo, n=order).removeO()
                 else:
                     expanded = series(p_rho, rho, oo, n=order).removeO()
-    
-                # Revenir à (xi, eta)
+        
+                # Revert to (xi, eta)
                 norm = sqrt(xi**2 + eta**2)
                 expansion_cart = expanded.subs({
                     rho: norm,
                     cos(theta): xi / norm,
                     sin(theta): eta / norm
                 })
-    
+        
                 return simplify(expansion_cart)
-    
+        
             except Exception as e:
                 print(f"Warning: 2D expansion failed: {e}")
                 return p
+
 
     def compose_asymptotic(self, other, order=1):
         """
@@ -507,44 +509,45 @@ class PseudoDifferentialOperator:
         bool
             True if elliptic on grid, False otherwise.
         """
-        RESAMPLE_SIZE = 32  # Taille réduite pour éviter l'explosion mémoire
-    
+        RESAMPLE_SIZE = 32  # Reduced size to prevent memory explosion
+        
         if self.dim == 1:
             x_vals = x_grid
             xi_vals = xi_grid
-            # Rééchantillonnage si nécessaire
+            # Resampling if necessary
             if len(x_vals) > RESAMPLE_SIZE:
                 x_vals = np.linspace(x_vals.min(), x_vals.max(), RESAMPLE_SIZE)
             if len(xi_vals) > RESAMPLE_SIZE:
                 xi_vals = np.linspace(xi_vals.min(), xi_vals.max(), RESAMPLE_SIZE)
-    
+        
             X, XI = np.meshgrid(x_vals, xi_vals, indexing='ij')
             symbol_vals = self.p_func(X, XI)
-    
+        
         elif self.dim == 2:
             x_vals, y_vals = x_grid
             xi_vals, eta_vals = xi_grid
-    
-            # Rééchantillonnage spatial
+        
+            # Spatial resampling
             if len(x_vals) > RESAMPLE_SIZE:
                 x_vals = np.linspace(x_vals.min(), x_vals.max(), RESAMPLE_SIZE)
             if len(y_vals) > RESAMPLE_SIZE:
                 y_vals = np.linspace(y_vals.min(), y_vals.max(), RESAMPLE_SIZE)
-    
-            # Rééchantillonnage fréquentiel
+        
+            # Frequency resampling
             if len(xi_vals) > RESAMPLE_SIZE:
                 xi_vals = np.linspace(xi_vals.min(), xi_vals.max(), RESAMPLE_SIZE)
             if len(eta_vals) > RESAMPLE_SIZE:
                 eta_vals = np.linspace(eta_vals.min(), eta_vals.max(), RESAMPLE_SIZE)
-    
+        
             X, Y, XI, ETA = np.meshgrid(x_vals, y_vals, xi_vals, eta_vals, indexing='ij')
             symbol_vals = self.p_func(X, Y, XI, ETA)
-    
+        
         else:
             raise NotImplementedError("Only 1D and 2D supported")
-    
+        
         min_abs_val = np.min(np.abs(symbol_vals))
         return min_abs_val > threshold
+
 
     def is_self_adjoint(self, tol=1e-10):
         """
@@ -927,7 +930,8 @@ class PseudoDifferentialOperator:
         plt.grid(True)
         plt.show()
 
-    def animate_singularity(self, xi0=5.0, eta0=0.0, tmax=4.0, n_frames=20, projection=None):
+    def animate_singularity(self, xi0=5.0, eta0=0.0, x0=0.0, y0=0.0,
+                            tmax=4.0, n_frames=100, projection=None):
         """
         Animate the motion of a singularity under the Hamiltonian flow.
     
@@ -935,15 +939,14 @@ class PseudoDifferentialOperator:
         ----------
         xi0, eta0 : float
             Initial frequency values (eta0 ignored in 1D)
+        x0, y0 : float
+            Initial spatial positions (y0 ignored in 1D)
         tmax : float
             Total time of animation
         n_frames : int
             Number of frames in animation
         projection : str or None
-            'position'   → show (x, y)
-            'frequency'  → show (xi, eta)
-            'phase'      → show (x, xi) or (x, eta)
-            None         → default: 'phase' in 1D, 'position' in 2D
+            'position', 'frequency', 'phase' or None (default: best choice per dimension)
     
         Returns
         -------
@@ -964,7 +967,7 @@ class PseudoDifferentialOperator:
         H = self.symplectic_flow()
     
         if any(im(H[k]) != 0 for k in H):
-            print("⚠️  The Hamiltonian field is complex. Only the real part is used for integration.")
+            print("⚠️ The Hamiltonian field is complex. Only the real part is used for integration.")
     
         if self.dim == 1:
             x, = self.vars_x
@@ -977,7 +980,8 @@ class PseudoDifferentialOperator:
                 x, xi = Y
                 return [dxdt(x, xi), dxidt(x, xi)]
     
-            sol = solve_ivp(hamilton, [0, tmax], [0.0, xi0], t_eval=np.linspace(0, tmax, n_frames))
+            sol = solve_ivp(hamilton, [0, tmax], [x0, xi0],
+                            t_eval=np.linspace(0, tmax, n_frames))
             x_vals, xi_vals = sol.y
     
             if projection is None:
@@ -1047,7 +1051,8 @@ class PseudoDifferentialOperator:
                     detadt(x, y, xi, eta)
                 ]
     
-            sol = solve_ivp(hamilton, [0, tmax], [0.0, 0.0, xi0, eta0], t_eval=np.linspace(0, tmax, n_frames))
+            sol = solve_ivp(hamilton, [0, tmax], [x0, y0, xi0, eta0],
+                            t_eval=np.linspace(0, tmax, n_frames))
             x_vals, y_vals, xi_vals, eta_vals = sol.y
     
             if projection is None:
@@ -1099,6 +1104,7 @@ class PseudoDifferentialOperator:
             ani = animation.FuncAnimation(fig, update, frames=n_frames, interval=50)
             plt.close(fig)
             return ani
+
 
     def interactive_symbol_analysis(pseudo_op,
                                     xlim=(-2, 2), ylim=(-2, 2),
@@ -1333,15 +1339,13 @@ class PDESolver:
         else:
             raise ValueError("Only 1D and 2D problems are supported.")
 
-    
-        self.fft_workers = 4
         
         if self.dim == 1:
-            self.fft = partial(fft, workers=self.fft_workers)
-            self.ifft = partial(ifft, workers=self.fft_workers)
+            self.fft = partial(fft, workers=FFT_WORKERS)
+            self.ifft = partial(ifft, workers=FFT_WORKERS)
         else:
-            self.fft = partial(fft2, workers=self.fft_workers)
-            self.ifft = partial(ifft2, workers=self.fft_workers)
+            self.fft = partial(fft2, workers=FFT_WORKERS)
+            self.ifft = partial(ifft2, workers=FFT_WORKERS)
         # Parse the equation
         self.linear_terms = {}
         self.nonlinear_terms = []
@@ -2151,7 +2155,7 @@ class PDESolver:
                 print("⚡ Optimisation : symbole indépendant de x — produit direct en Fourier.")
                 R_vals = R_func(self.KX)
                 u_hat = R_vals * f_hat
-                u = np.fft.ifft(u_hat)
+                u = self.ifft(u_hat)
             else:
                 print("⚙️  Quantification de Kohn-Nirenberg 1D")
                 x, xi = symbols('x xi', real=True)
@@ -2164,7 +2168,7 @@ class PDESolver:
                 print("⚡ Optimisation : symbole indépendant de x et y — produit direct en Fourier 2D.")
                 R_vals = np.vectorize(R_func)(self.KX, self.KY)
                 u_hat = R_vals * f_hat
-                u = np.fft.ifft2(u_hat)
+                u = self.ifft(u_hat)
             else:
                 print("⚙️  Quantification de Kohn-Nirenberg 2D")
                 x, xi, y, eta = symbols('x xi y eta', real=True)
@@ -2208,13 +2212,13 @@ class PDESolver:
     
             # Frequency grid (shifted to center zero)
             Nx = self.Nx
-            k = 2 * np.pi * np.fft.fftshift(np.fft.fftfreq(Nx, d=dx))
+            k = 2 * np.pi * fftshift(fftfreq(Nx, d=dx))
             dk = k[1] - k[0]
     
             # Centered FFT of input
-            f_shift = np.fft.ifftshift(f_vals)
+            f_shift = fftshift(f_vals)
             f_hat = self.fft(f_shift) * dx
-            f_hat = np.fft.fftshift(f_hat)
+            f_hat = fftshift(f_hat)
     
             # Build meshgrid for (x, ξ)
             X, K = np.meshgrid(xg, k, indexing='ij')
@@ -2257,13 +2261,13 @@ class PDESolver:
             Nx, Ny = self.Nx, self.Ny
     
             # Frequency grids
-            kx = 2 * np.pi * np.fft.fftshift(np.fft.fftfreq(Nx, d=dx))
-            ky = 2 * np.pi * np.fft.fftshift(np.fft.fftfreq(Ny, d=dy))
+            kx = 2 * np.pi * fftshift(fftfreq(Nx, d=dx))
+            ky = 2 * np.pi * fftshift(fftfreq(Ny, d=dy))
             dkx = kx[1] - kx[0]
             dky = ky[1] - ky[0]
     
             # 2D FFT of f(x, y)
-            f_hat = np.fft.fftshift(self.fft(f_vals)) * dx * dy
+            f_hat = fftshift(self.fft(f_vals)) * dx * dy
     
             # Create 4D grids for broadcasting
             X, Y = np.meshgrid(self.x_grid, self.y_grid, indexing='ij')

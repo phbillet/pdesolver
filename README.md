@@ -2,67 +2,64 @@
 
 ## Overview
 
-`PDESolver` is a comprehensive and modular Python framework for the numerical solution and analysis of partial differential equations (PDEs) in 1D and 2D. It combines symbolic equation parsing with spectral methods to offer a flexible environment for wave propagation, dispersion analysis, and energy monitoring. New features include direct support for custom pseudo-differential operators and a suite of advanced visualization tools.
+`PDESolver` is a modular Python framework for the numerical solution and analysis of partial differential equations (PDEs) in 1D and 2D. It combines symbolic parsing, pseudo-spectral methods, and support for custom pseudo-differential operators. The framework enables advanced wave analysis, ellipticity diagnostics, and interactive visualizations for symbolic operators.
 
 ---
 
 ## Key Features
 
-* **Symbolic Parsing**
+* **Symbolic Equation Parsing**
 
-  * Automatically separates linear, nonlinear, symbolic operator, pseudo-differential, and source terms from user-defined equations.
-  * Supports both classical derivatives and custom operator wrappers (`Op` and `psiOp`).
+  * Automatically separates linear, nonlinear, symbolic operator (`Op`), pseudo-differential (`psiOp`), and source terms.
+  * Supports both standard derivatives and custom pseudo-differential forms via `Op(expr, u)` or `psiOp(expr, u)`.
 
 * **Pseudo-Differential Operators**
 
-  * Define fractional or nonlocal operators directly in Fourier space using `Op(symbol, u)` and `psiOp(symbol, u)` wrappers.
-  * Automatic extraction of operator symbols from symbolic expressions when needed.
-  * Numerical evaluation via the `PseudoDifferentialOperator` class for both 1D and 2D domains.
+  * Define fractional, nonlocal, or space-dependent operators in Fourier space.
+  * Symbol evaluation in either direct symbolic mode (`symbol`) or automatic extraction mode (`auto`).
+  * Numerical symbol evaluation and visualization via the `PseudoDifferentialOperator` class (1D and 2D).
 
-* **Spectral Methods**
+* **Spectral Discretization**
 
-  * Fast Fourier Transform (FFT) based spatial discretization for high accuracy.
-  * Dealiasing strategies to mitigate spectral aliasing errors.
+  * Uses FFT and IFFT for spatial derivatives.
+  * Built-in dealiasing using configurable frequency cutoffs.
 
+* **Temporal Integration**
 
-* **Evolution Equation Support**
+  * Supports first- and second-order in time equations.
+  * Multiple time schemes: exponential time stepping, ETD-RK4 (1st and 2nd order), and Leap-Frog integration.
+  * Stationary PDEs (no time variable) are automatically detected and treated accordingly.
 
-  * `PDESolver` provides robust support for time-dependent **evolution equations**, including first- and second-order PDEs in time.
-  * The solver uses spectral methods combined with advanced time-stepping schemes :
-      * Exponential time stepping and ETD-RK4 methods for first-order and second-order time derivatives.
-      * Leap-frog and Runge-Kutta schemes for robust temporal evolution.
-  *  It automatically extracts dispersion relations from symbolic equations and applies appropriate temporal integrators based on the structure of the linear operator. This enables accurate simulation of wave propagation, dispersive effects, and energy-preserving dynamics.
+* **Visualization and Microlocal Analysis**
 
+  * **Wavefront Set**: Visualize how singularities propagate across space and frequency.
+  * **Cotangent Fiber**: Inspect symbol magnitude at fixed spatial locations.
+  * **Symbol Amplitude / Phase**: View maps of operator behavior across the domain.
+  * **Characteristic Set**: Identify vanishing zones of the symbol.
+  * **Micro-Support & Hamiltonian Flow**: Track propagation of microlocal energy.
+  * **Symplectic Vector Field & Group Velocity**: Analyze symbol-induced flows in phase space.
 
-* **Stationary PDE Support**
+* **Wave Propagation Tools**
 
-  * In addition to time-dependent problems, `PDESolver` offers robust support for solving **stationary partial differential equations** using spectral methods and asymptotic inversion techniques for `psiOp(symbol, u)` operators.
-  * This is particularly useful for elliptic equations and problems involving pseudo-differential operators.
-  * Visualization tools are also integrated to analyze the operator symbol, solution structure, and error against exact solutions.
+  * Compute dispersion relation, phase and group velocity.
+  * Full anisotropy support in 2D systems.
+  * Symbol quantization in Kohn–Nirenberg form for variable coefficients.
 
-* **Visualization and Analysis**
+* **Stationary Solvers and Ellipticity Checks**
 
-  * **Wavefront Set**: Visualize the magnitude of operator symbols across position and frequency domains.
-  * **Cotangent Fiber Structure**: Contour plots showing symbol values over the phase space.
-  * **Symbol Amplitude and Phase Portraits**: Color maps of absolute values and phase of symbols.
-  * **Characteristic Set**: Contours indicating where the symbol vanishes.
-  * **Dynamic Wavefront**: Time-evolving wavefront visualization in 1D and 2D.
-  * Automated integration of symbol and solution visualizations during setup and solving.
-
-* **Wave Propagation Analysis**
-
-  * Compute and plot dispersion relations, phase velocity, and group velocity.
-  * Support for anisotropy analysis in 2D systems.
+  * Automatic symbolic inversion via right asymptotic inverse when applicable.
+  * Numerical ellipticity testing for `psiOp` symbols on grid.
 
 * **Energy Monitoring**
 
-  * Track total energy over time for second-order systems.
-  * Plot energy evolution with options for linear and logarithmic scales.
+  * Computes total system energy (especially for second-order systems).
+  * Supports linear and logarithmic scale energy plots.
 
-* **Animation Tools**
+* **Animation and Solution Visualization**
 
-  * Generate animations of solution evolution in 1D (line plots) and 2D (surface plots).
-  * Options for overlays, contour lines, or front gradients.
+  * Create time-evolving animations for 1D (line) and 2D (surface) solutions.
+  * Interactive symbol analysis widgets for symbol inspection.
+  * Options for overlaying phase fronts, wavefront tracking, and singularities.
 
 ---
 
@@ -71,23 +68,12 @@
 ### Prerequisites
 
 * Python 3.8 or higher
-* Required libraries: `numpy`, `scipy`, `matplotlib`, `sympy`
+* Required libraries: `numpy`, `scipy`, `matplotlib`, `sympy`, `ipywidgets`
 
 ### Installing Dependencies
 
-Install the necessary packages via pip:
-
 ```bash
-pip install numpy scipy matplotlib sympy
-```
-
-### Downloading the Code
-
-Clone the repository and navigate into its directory:
-
-```bash
-git clone https://github.com/phbillet/pdesolver.git
-cd pdesolver
+pip install numpy scipy matplotlib sympy ipywidgets
 ```
 
 ---
@@ -96,46 +82,54 @@ cd pdesolver
 
 1. **Define a PDE** using SymPy:
 
-   ```python
-   from sympy import symbols, Function, Eq, diff
-   from pdesolver import PDESolver
+```python
+from sympy import symbols, Function, Eq, diff
+from PDESolver_33 import PDESolver
+import numpy as np
 
-   t, x = symbols('t x')
-   u = Function('u')(t, x)
-   equation = Eq(diff(u, t, t) - diff(u, x, 2), 0)
-   ```
+t, x = symbols('t x')
+u = Function('u')(t, x)
+equation = Eq(diff(u, t), diff(u, x, 2) + u**2)
+```
 
 2. **Initialize the Solver**:
 
-   ```python
-   solver = PDESolver(equation)
-   ```
+```python
+solver = PDESolver(equation, time_scheme='ETD-RK4', dealiasing_ratio=2/3)
+```
 
 3. **Setup Domain and Initial Conditions**:
 
-   ```python
-   def initial_condition(x):
-       return np.exp(-x**2)
+```python
+def initial_condition(x):
+    return np.sin(x)
 
-   solver.setup(
-       Lx=10, Nx=256,
-       Lt=5, Nt=1000,
-       initial_condition=initial_condition
-   )
-   ```
+solver.setup(
+    Lx=2 * np.pi, Nx=128,
+    Lt=1.0, Nt=1000,
+    initial_condition=initial_condition
+)
+```
 
-4. **Solve the PDE**:
+4. **Solve and Animate**:
 
-   ```python
-   solver.solve()
-   ```
+```python
+solver.solve()
+ani = solver.animate(component='real')
+```
 
-5. **Visualize and Animate**:
+---
 
-   ```python
-   ani = solver.animate(component='abs')
-   solver.plot_energy(log=True)
-   ```
+## Jupyter Notebooks for Testing
+
+Several Jupyter notebooks are provided to test and demonstrate the capabilities of the solver:
+
+* `PDE_symbolic_tester.ipynb`: Verifies the correctness of exact solutions for 1D and 2D symbolic PDEs.
+* `PDESolver_psiOp_tester.ipynb`: Tests the features of the PseudoDifferentialOperator class, including symbol evaluation and visualization.
+* `PDESolver_tester_1D.ipynb`: Exercises the PDESolver class on various 1D PDEs such as the heat equation, wave equation, and equations with nonlocal or fractional operators.
+* `PDESolver_tester_2D.ipynb`: Tests the PDESolver class on 2D PDEs including the heat equation, wave equation, and the Klein–Gordon equation.
+
+These notebooks serve both as validation tools and as usage examples. They are ideal entry points for new users wishing to understand the solver's capabilities.
 
 ---
 
@@ -145,22 +139,20 @@ Contributions are welcome! Please fork the repository, create a feature branch, 
 
 ---
 
-
-## **License**
+## License
 
 PDESolver is distributed under the [Apache License 2.0](https://www.apache.org/licenses/LICENSE-2.0).
 
-You are free to use, modify, and redistribute this software under the terms of this license.
-Redistributions must include appropriate copyright notices.
+You are free to use, modify, and redistribute this software under the terms of this license. Redistributions must include appropriate copyright.
 
-### Author attribution
+### Author Attribution
 
 If you use PDESolver in your project or derivative work, please retain the original author attribution:
 
-**Philippe Billet (2025)**  
+**Philippe Billet (2025)**
 
 ---
 
-## **Acknowledgments**
+## Acknowledgments
 
-The code and documentation presented here were generated with the assistance of large language models (LLMs), utilizing their free-tier capabilities. This project would not have been possible without the invaluable support of these advanced AI tools. We extend our gratitude to **ChatGPT**, **Qwen**, **DeepSeek**, **Claude**, and the **Mistral chat** for their contributions in generating, refining, and structuring both the code and its accompanying documentation. Their ability to assist in complex problem-solving and technical writing has been instrumental in bringing this project to life. Thank you!
+This project was built with the assistance of advanced language models, which played a key role in generating and structuring code and documentation. Thanks to **ChatGPT**, **Qwen**, **DeepSeek**, **Claude**, and **Mistral** for their contributions to automated reasoning and documentation synthesis.
