@@ -2,7 +2,19 @@ name: Test Jupyter Notebooks
 
 on:
   push:
+    paths:
+      - '*.ipynb'
+      - '**/*.ipynb'
+      - '*.py'
+      - '**/*.py'
+      - requirements.txt
   pull_request:
+    paths:
+      - '*.ipynb'
+      - '**/*.ipynb'
+      - '*.py'
+      - '**/*.py'
+      - requirements.txt
 
 jobs:
   test-notebooks:

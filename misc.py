@@ -87,6 +87,44 @@ rectangle_function = lambda x, y: (x - corner1_rectangle[0]) * (x - corner2_rect
 # Cross
 cross_function = lambda x, y: min(abs(x - center_cross[0]) - width_cross, abs(y - center_cross[1]) - height_cross) + 2
 
+from sympy import sympify
+
+def make_symbol(g=None, b=None, V=None):
+    """
+    Assemble a 2D psiOp symbol from:
+    - g: a symmetric metric tensor g = [[g_xx, g_xy], [g_yx, g_yy]] (functions or strings)
+    - b: a vector b = [b_x, b_y] (functions or strings)
+    - V: a scalar potential V(x, y) (function or string)
+
+    Returns a SymPy expression representing the symbol sigma(x, y, xi, eta).
+    """
+    terms = []
+
+    # Metric term (quadratic)
+    if g is not None:
+        g_xx, g_xy = g[0]
+        g_yx, g_yy = g[1]
+
+        # Symmetrize manually
+        terms.append(f"({g_xx})*xi**2")
+        terms.append(f"({g_yy})*eta**2")
+        sym_xy = f"0.5*(({g_xy}) + ({g_yx}))"
+        terms.append(f"2*({sym_xy})*xi*eta")
+
+    # Vector (torsion-like) term (linear)
+    if b is not None:
+        b_x, b_y = b
+        terms.append(f"({b_x})*xi")
+        terms.append(f"({b_y})*eta")
+
+    # Scalar potential term
+    if V is not None:
+        terms.append(f"({V})")
+
+    symbol_str = " + ".join(terms)
+    return sympify(symbol_str)
+
+
 operator_symbols = {
     "identity": {
         "physical": "u(x)",

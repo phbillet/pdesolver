@@ -11,6 +11,64 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+"""
+PDESolver — A Spectral Method PDE Solver with Symbolic Capabilities
+
+Overview
+--------
+This module provides a flexible and symbolic-based solver for partial differential equations (PDEs)
+using spectral methods. It supports:
+- 1D and 2D problems
+- First- and second-order time evolution
+- Linear and nonlinear PDEs
+- Symbolic parsing via SymPy
+- Exponential time integration and ETD-RK4 schemes
+- Advanced pseudo-differential operator analysis
+- Interactive visualization using IPython widgets
+
+Symbolic Workflow
+-----------------
+The solver accepts PDEs defined symbolically using SymPy syntax. For example:
+>>> from sympy import Function, diff, Eq
+>>> u = Function('u')
+>>> t, x = symbols('t x')
+>>> eq = Eq(diff(u(t,x), t), diff(u(t,x), x, 2) + u(t,x)**2)
+
+It automatically extracts:
+- The linear operator L(k)
+- Dispersion relation ω(k)
+- Nonlinear terms
+- Pseudo-differential operators (psiOp)
+
+Numerical Methods
+-----------------
+- Fourier-based spectral differentiation
+- Dealiasing for nonlinear terms
+- Temporal integrators:
+    - Default exponential stepping
+    - ETD-RK4 (Exponential Time Differencing Runge-Kutta of 4th order)
+
+Interactive Analysis
+--------------------
+Use `interactive_symbol_analysis(pseudo_op)` to explore:
+- Group velocity fields
+- Symbol amplitude/phase
+- Hamiltonian flows
+- Characteristic sets
+- Wavefront propagation
+
+Example Usage
+-------------
+>>> from sympy import sin, pi
+>>> def initial(x): return sin(2 * pi * x)
+>>> solver = PDESolver(eq)
+>>> solver.setup(Lx=1.0, Nx=256, Lt=1.0, Nt=1000, initial_condition=initial)
+>>> solver.solve()
+>>> ani = solver.animate()
+>>> HTML(ani.to_jshtml())
+"""
+
+# [Then follows the rest of your imports and code]
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -72,12 +130,23 @@ class PseudoDifferentialOperator:
         Function u(x, t) used in auto mode to extract the operator symbol.
     mode : str, {'symbol', 'auto'}
         - 'symbol': directly uses expr as the operator symbol.
-        - 'auto': computes the symbol automatically by applying expr to exp(i x xi).
+        - 'auto': computes the symbol automatically by applying expr to exp(i x ξ).
+
+    Attributes
+    ----------
+    dim : int
+        Spatial dimension (1 or 2).
+    fft, ifft : callable
+        Fast Fourier transform and inverse (scipy.fft or scipy.fft2).
+    p_func : callable
+        Evaluated symbol function ready for numerical use.
 
     Notes
     -----
-    - Supports 1D and 2D operators.
-    - Uses numpy for numerical evaluation and scipy.fft for FFTs.
+    - In 'symbol' mode, `expr` should be expressed in terms of spatial variables and frequency variables (ξ, η).
+    - In 'auto' mode, the symbol is derived by applying the differential expression to a complex exponential.
+    - Frequency variables are internally named 'xi' and 'eta' for consistency.
+    - Uses numpy for numerical evaluation and scipy.fft for FFT operations.
 
     Examples
     --------
@@ -91,7 +160,6 @@ class PseudoDifferentialOperator:
     >>> u = Function('u')
     >>> expr = u(x).diff(x)
     >>> op = PseudoDifferentialOperator(expr=expr, vars_x=[x], var_u=u(x), mode='auto')
-
     """
 
     def __init__(self, expr, vars_x, var_u=None, mode='symbol'):
@@ -148,21 +216,29 @@ class PseudoDifferentialOperator:
         
     def evaluate(self, X, Y, KX, KY, cache=True):
         """
-        Evaluate the symbol on a spatial-frequency grid.
+        Evaluate the pseudo-differential operator's symbol on a grid of spatial and frequency coordinates.
+
+        The method dynamically selects between 1D and 2D evaluation based on the spatial dimension.
+        If caching is enabled and a cached symbol exists, it returns the cached result to avoid recomputation.
 
         Parameters
         ----------
-        X, Y : np.ndarray
-            Spatial grid coordinates (Y is ignored in 1D).
-        KX, KY : np.ndarray
-            Frequency grid coordinates (KY is ignored in 1D).
+        X, Y : ndarray
+            Spatial grid coordinates. In 1D, Y is ignored.
+        KX, KY : ndarray
+            Frequency grid coordinates. In 1D, KY is ignored.
         cache : bool, default=True
-            Whether to use/cached computed values.
+            If True, stores the computed symbol for reuse in subsequent calls to avoid redundant computation.
 
         Returns
         -------
-        np.ndarray
-            Evaluated symbol values on the grid.
+        ndarray
+            Evaluated symbol values over the input grid. Shape matches the input spatial/frequency grids.
+
+        Raises
+        ------
+        NotImplementedError
+            If the spatial dimension is not 1D or 2D.
         """
         if cache and self.symbol_cached is not None:
             return self.symbol_cached
@@ -187,18 +263,31 @@ class PseudoDifferentialOperator:
 
     def principal_symbol(self, order=1):
         """
-        Return the homogeneous principal symbol of the operator.
-        
+        Compute the leading homogeneous component of the pseudo-differential symbol.
+
+        This method extracts the principal part of the symbol, which is the dominant 
+        term under high-frequency asymptotics (|ξ| → ∞). The expansion is performed 
+        in polar coordinates for 2D symbols to maintain rotational symmetry, then 
+        converted back to Cartesian form.
+
         Parameters
         ----------
         order : int
-            Degree of homogeneity in |ξ| (or (ξ, η)).
-        
+            Order of the asymptotic expansion in powers of 1/ρ, where ρ = |ξ| in 1D 
+            or ρ = sqrt(ξ² + η²) in 2D. Only the leading-order term is returned.
+
         Returns
         -------
-        sympy expression
-            Leading homogeneous part of the symbol.
+        sympy.Expr
+            The principal symbol component, homogeneous of degree `m - order`, where 
+            `m` is the original symbol's order.
+
+        Notes:
+        - In 1D, uses direct series expansion in ξ.
+        - In 2D, expands in radial variable ρ while preserving angular dependence.
+        - Useful for microlocal analysis and constructing parametrices.
         """
+
         p = self.expr
         if self.dim == 1:
             xi = symbols('xi', real=True)
@@ -214,23 +303,38 @@ class PseudoDifferentialOperator:
                                              cos(theta): xi / sqrt(xi**2 + eta**2),
                                              sin(theta): eta / sqrt(xi**2 + eta**2)})
             return simplify(expansion_cart)
-
-            
+           
     def symbol_order(self, max_order=10, tol=1e-3):
         """
-        Estimate the order (degree of homogeneity) of the pseudo-differential symbol.
-    
+        Estimate the order (degree of homogeneity) of the pseudo-differential symbol in high-frequency asymptotics.
+
+        This method determines the leading-order term's degree of homogeneity by:
+        - Expanding the symbol p(x, ξ) in an asymptotic series as |ξ| → ∞
+        - Testing successive degrees up to `max_order`
+        - Using a numerical tolerance `tol` to filter negligible coefficients
+
+        Supports both 1D and 2D symbols:
+        - In 1D: expands directly in ξ
+        - In 2D: introduces polar coordinates (ρ, θ) and expands in ρ = |ξ|
+
         Parameters
         ----------
-        max_order : int
-            Maximum order to test.
-        tol : float
-            Tolerance for considering a term non-zero.
-    
+        max_order : int, default=10
+            Maximum polynomial degree to test for non-zero leading term.
+        tol : float, default=1e-3
+            Threshold below which coefficients are considered zero.
+
         Returns
         -------
         int or None
-            Estimated order (homogeneity degree), or None if not determined.
+            Estimated homogeneity degree of the symbol, or None if expansion fails 
+            or no significant term is found within tolerance.
+
+        Notes
+        -----
+        - Homogeneity is crucial for ellipticity and microlocal analysis.
+        - The method ignores terms still depending on spatial variables x/y.
+        - Robust to symbolic simplification errors via try/except blocks.
         """
         from sympy import symbols, simplify, series, oo, sqrt, cos, sin, expand
         
@@ -279,20 +383,36 @@ class PseudoDifferentialOperator:
         else:
             raise NotImplementedError("Only 1D and 2D are supported.")
 
-
     def asymptotic_expansion(self, order=3):
         """
-        Asymptotic expansion of the symbol in |ξ| → ∞.
-    
+        Compute the asymptotic expansion of the symbol as |ξ| → ∞ (high-frequency regime).
+
+        This method expands the pseudo-differential symbol in inverse powers of the 
+        frequency variable(s), either in 1D or 2D. It handles both polynomial and 
+        exponential symbols by performing a series expansion in 1/|ξ| up to the specified order.
+
         Parameters
         ----------
-        order : int
-            Order up to which the expansion is computed.
-    
+        order : int, optional
+            Maximum order of the asymptotic expansion. Default is 3.
+
         Returns
         -------
-        sympy expression
-            Expansion up to order `order` in 1/|ξ|.
+        sympy.Expr
+            The asymptotic expansion of the symbol up to the given order, expressed in Cartesian coordinates.
+            If expansion fails, returns the original unexpanded symbol.
+
+        Notes:
+        - In 1D: expansion is performed directly in terms of ξ.
+        - In 2D: the symbol is first rewritten in polar coordinates (ρ,θ), expanded asymptotically 
+          in ρ → ∞, then converted back to Cartesian coordinates (ξ,η).
+        - Handles special case when the symbol is an exponential function by expanding its argument.
+        - Robust to failures: catches exceptions and issues warnings instead of raising errors.
+
+        Examples:
+        >>> op = PseudoDifferentialOperator(expr=exp(-xi**-2), vars_x=[x])
+        >>> op.asymptotic_expansion(4)
+        1 - 1/ξ² + 1/(2ξ⁴) + ...
         """
         p = self.expr
         
@@ -347,8 +467,36 @@ class PseudoDifferentialOperator:
 
     def compose_asymptotic(self, other, order=1):
         """
-        Compose self with another PseudoDifferentialOperator via asymptotic expansion.
+        Compose this pseudo-differential operator with another using formal asymptotic expansion.
+
+        This method computes the composition symbol via an asymptotic expansion in powers of 
+        derivatives, following the symbolic calculus of pseudo-differential operators. The 
+        composition is performed up to the specified order and respects the dimensionality 
+        (1D or 2D) of the operators.
+
+        Parameters
+        ----------
+        other : PseudoDifferentialOperator
+            The pseudo-differential operator to compose with this one.
+        order : int, default=1
+            Maximum order of the asymptotic expansion. Higher values include more terms in the 
+            symbolic composition, increasing accuracy at the cost of complexity.
+
+        Returns
+        -------
+        sympy.Expr
+            Symbolic expression representing the asymptotic expansion of the composed operator.
+
+        Notes
+        -----
+        - In 1D, the composition uses the formula:
+          (p ∘ q)(x, ξ) ~ Σₙ (1/n!) ∂_ξⁿ p(x, ξ) ∂_xⁿ q(x, ξ) (i)^{-n}
+        - In 2D, the multi-index generalization is used:
+          (p ∘ q)(x, y, ξ, η) ~ Σₙ Σᵢ (1/(i! j!)) ∂_ξⁱ∂_ηʲ p ∂_xⁱ∂_yʲ q (i)^{-n}, where n = i + j.
+        - This expansion is valid for symbols admitting an asymptotic series representation.
+        - Operators must be defined on the same spatial domain (same dimension).
         """
+
         assert self.dim == other.dim, "Operator dimensions must match"
         p, q = self.expr, other.expr
     
@@ -375,7 +523,31 @@ class PseudoDifferentialOperator:
 
     def right_inverse_asymptotic(self, order=1):
         """
-        Construct right formal inverse R such that P \circ R = I + O(xi^{-order})
+        Construct a formal right inverse R of the pseudo-differential operator P such that 
+        the composition P ∘ R equals the identity plus a smoothing operator of order -order.
+    
+        This method computes an asymptotic expansion for the right inverse using recursive 
+        corrections based on derivatives of the symbol p(x, ξ) and lower-order terms of R.
+    
+        Parameters
+        ----------
+        order : int
+            Number of terms to include in the asymptotic expansion. Higher values improve 
+            approximation at the cost of complexity and computational effort.
+    
+        Returns
+        -------
+        sympy.Expr
+            The symbolic expression representing the formal right inverse R(x, ξ), which satisfies:
+            P ∘ R = Id + O(⟨ξ⟩^{-order}), where ⟨ξ⟩ = (1 + |ξ|²)^{1/2}.
+    
+        Notes
+        -----
+        - In 1D: The recursion involves spatial derivatives of R and derivatives of p with respect to ξ.
+        - In 2D: The multi-index generalization is used with mixed derivatives in ξ and η.
+        - The construction relies on the non-vanishing of the principal symbol p to ensure invertibility.
+        - Each term in the expansion corresponds to higher-order corrections involving commutators 
+          between the operator P and the current approximation of R.
         """
         p = self.expr
         if self.dim == 1:
@@ -409,7 +581,35 @@ class PseudoDifferentialOperator:
 
     def left_inverse_asymptotic(self, order=1):
         """
-        Construct left formal inverse L such that L \circ P = I + O(xi^{-order})
+        Construct a formal left inverse L such that the composition L ∘ P equals the identity 
+        operator up to terms of order ξ^{-order}. This expansion is performed asymptotically 
+        at infinity in the frequency variable(s).
+    
+        The left inverse is built iteratively using symbolic differentiation and the 
+        method of asymptotic expansions for pseudo-differential operators. It ensures that:
+        
+            L(P(x,ξ),x,D) ∘ P(x,D) = Id + smoothing operator of order -order
+    
+        Parameters
+        ----------
+        order : int, optional
+            Maximum number of terms in the asymptotic expansion (default is 1). Higher values 
+            yield more accurate inverses at the cost of increased computational complexity.
+    
+        Returns
+        -------
+        sympy.Expr
+            Symbolic expression representing the principal symbol of the formal left inverse 
+            operator L(x,ξ). This expression depends on spatial variables and frequencies, 
+            and includes correction terms up to the specified order.
+    
+        Notes
+        -----
+        - In 1D: Uses recursive application of the Leibniz formula for symbols.
+        - In 2D: Generalizes to multi-indices for mixed derivatives in (x,y) and (ξ,η).
+        - Each term involves combinations of derivatives of the original symbol p(x,ξ) and 
+          previously computed terms of the inverse.
+        - Coefficients include powers of 1j (i) and factorial normalization for derivative terms.
         """
         p = self.expr
         if self.dim == 1:
@@ -443,12 +643,22 @@ class PseudoDifferentialOperator:
 
     def formal_adjoint(self):
         """
-        Compute the formal adjoint of the pseudo-differential operator.
-        
+        Compute the formal adjoint symbol P* of the pseudo-differential operator.
+
+        The adjoint is defined such that for any test functions u and v,
+        ⟨P u, v⟩ = ⟨u, P* v⟩ holds in the distributional sense. This is obtained by 
+        taking the complex conjugate of the symbol and expanding it asymptotically 
+        at infinity to ensure proper behavior under integration by parts.
+
         Returns
         -------
-        sympy expression
-            Symbol of the adjoint operator P^*.
+        sympy.Expr
+            The adjoint symbol P*(x, ξ) in 1D or P*(x, y, ξ, η) in 2D.
+        
+        Notes:
+        - In 1D, the expansion is performed in powers of 1/|ξ|.
+        - In 2D, the expansion is radial in |ξ| = sqrt(ξ² + η²).
+        - This method ensures symbolic simplifications for readability and efficiency.
         """
         p = self.expr
         if self.dim == 1:
@@ -466,12 +676,24 @@ class PseudoDifferentialOperator:
 
     def symplectic_flow(self):
         """
-        Compute the Hamiltonian vector field of the symbol.
-    
+        Compute the Hamiltonian vector field associated with the principal symbol.
+
+        This method derives the canonical equations of motion for the phase space variables 
+        (x, ξ) in 1D or (x, y, ξ, η) in 2D, based on the Hamiltonian formalism. These describe 
+        how position and frequency variables evolve under the flow generated by the symbol.
+
         Returns
         -------
         dict
-            Dictionary with 'dx/dt', 'dξ/dt' (and optionally y, η).
+            A dictionary containing the components of the Hamiltonian vector field:
+            - In 1D: keys are 'dx/dt' and 'dxi/dt', corresponding to dx/dt = ∂p/∂ξ and dξ/dt = -∂p/∂x.
+            - In 2D: keys are 'dx/dt', 'dy/dt', 'dxi/dt', and 'deta/dt', with similar definitions:
+              dx/dt = ∂p/∂ξ, dy/dt = ∂p/∂η, dξ/dt = -∂p/∂x, dη/dt = -∂p/∂y.
+
+        Notes
+        -----
+        - The Hamiltonian here is the principal symbol p(x, ξ) itself.
+        - This flow preserves the symplectic structure of phase space.
         """
         if self.dim == 1:
             x, = self.vars_x
@@ -492,22 +714,29 @@ class PseudoDifferentialOperator:
 
     def is_elliptic_numerically(self, x_grid, xi_grid, threshold=1e-8):
         """
-        Check if the symbol is elliptic on a grid of (x, xi) or (x, y, xi, eta),
-        with resampling to avoid memory explosion in 2D.
+        Check if the pseudo-differential symbol p(x, ξ) is elliptic over a given grid.
+    
+        A symbol is considered elliptic if its magnitude |p(x, ξ)| remains bounded away from zero 
+        across all points in the spatial-frequency domain. This method evaluates the symbol on a 
+        grid of spatial and frequency coordinates and checks whether its minimum absolute value 
+        exceeds a specified threshold.
+    
+        Resampling is applied to large grids to prevent excessive memory usage, particularly in 2D.
     
         Parameters
         ----------
         x_grid : ndarray
-            1D or 2D spatial grid (x or (x, y)).
+            Spatial grid: either a 1D array (x) or a tuple of two 1D arrays (x, y).
         xi_grid : ndarray
-            1D or 2D frequency grid (xi or (xi, eta)).
-        threshold : float
-            Minimum allowed magnitude of the symbol.
+            Frequency grid: either a 1D array (ξ) or a tuple of two 1D arrays (ξ, η).
+        threshold : float, optional
+            Minimum acceptable value for |p(x, ξ)|. If the smallest evaluated symbol value falls below this,
+            the symbol is not considered elliptic.
     
         Returns
         -------
         bool
-            True if elliptic on grid, False otherwise.
+            True if the symbol is elliptic on the resampled grid, False otherwise.
         """
         RESAMPLE_SIZE = 32  # Reduced size to prevent memory explosion
         
@@ -551,11 +780,28 @@ class PseudoDifferentialOperator:
 
     def is_self_adjoint(self, tol=1e-10):
         """
-        Check whether the operator is formally self-adjoint.
-    
+        Check whether the pseudo-differential operator is formally self-adjoint (Hermitian).
+
+        A self-adjoint operator satisfies P = P*, where P* is the formal adjoint of P.
+        This property is essential for ensuring real-valued eigenvalues and stable evolution 
+        in quantum mechanics and symmetric wave propagation.
+
+        Parameters
+        ----------
+        tol : float
+            Tolerance for symbolic comparison between P and P*. Small numerical differences 
+            below this threshold are considered equal.
+
         Returns
         -------
         bool
+            True if the symbol p(x, ξ) equals its formal adjoint p*(x, ξ) within the given tolerance,
+            indicating that the operator is self-adjoint.
+
+        Notes:
+        - The formal adjoint is computed via conjugation and asymptotic expansion at infinity in ξ.
+        - Symbolic simplification is used to verify equality, ensuring robustness against superficial 
+          expression differences.
         """
         p = self.expr
         p_star = self.formal_adjoint()
@@ -563,15 +809,25 @@ class PseudoDifferentialOperator:
 
     def is_homogeneous(self, degree):
         """
-        Check whether the symbol is homogeneous of a given degree in (ξ, η).
-    
+        Check whether the symbol is homogeneous of a given degree in frequency variables (ξ, η).
+        
+        A function p(ξ) or p(ξ, η) is homogeneous of degree m if p(λξ) = λᵐ p(ξ) for all λ > 0.
+        This method tests this identity symbolically using SymPy.
+
         Parameters
         ----------
         degree : int or float
-    
+            The expected degree of homogeneity m.
+
         Returns
         -------
         bool
+            True if the symbol is homogeneous of the specified degree, False otherwise.
+
+        Notes:
+        - For 1D symbols, checks p(λξ) == λᵐ p(ξ)
+        - For 2D symbols, checks p(λξ, λη) == λᵐ p(ξ, η)
+        - Uses symbolic simplification to verify equality
         """
         if self.dim == 1:
             xi = symbols('xi', real=True)
@@ -585,16 +841,27 @@ class PseudoDifferentialOperator:
 
     def visualize_wavefront(self, x_grid, xi_grid, y_grid=None, eta_grid=None, xi0=0.0, eta0=0.0):
         """
-        Visualize the wavefront set of the symbol.
-
+        Visualize the wavefront set by plotting the magnitude of the symbol |p(x, ξ)| in 1D 
+        or a slice |p(x, y, ξ₀, η₀)| in 2D. This provides insight into the microlocal singularities 
+        of the operator's symbol.
+    
+        The wavefront set characterizes the location and direction of singularities in a distribution. 
+        Here, it is approximated numerically by evaluating the symbol on a spatial-frequency grid.
+    
         Parameters
         ----------
-        x_grid, y_grid : np.ndarray
-            Spatial grids.
-        xi_grid, eta_grid : np.ndarray
-            Frequency grids.
+        x_grid, y_grid : ndarray
+            Spatial grid arrays (y_grid is optional for 1D problems).
+        xi_grid, eta_grid : ndarray
+            Frequency grid arrays (eta_grid is optional for 1D problems).
         xi0, eta0 : float
-            Fixed frequency values for visualization.
+            Fixed frequency values used to slice the symbol in 2D visualization.
+    
+        Notes
+        -----
+        - In 1D: Displays |p(x, ξ)| as a 2D color map with axes (x, ξ).
+        - In 2D: Displays |p(x, y, ξ₀, η₀)| as a 2D color map over the spatial domain.
+        - Uses imshow for efficient visualization with automatic aspect scaling.
         """
         if self.dim == 1:
             symbol_vals = self.p_func(x_grid[:, None], xi_grid[None, :])
@@ -618,14 +885,33 @@ class PseudoDifferentialOperator:
 
     def visualize_fiber(self, x_grid, xi_grid, y0=0.0, x0=0.0):
         """
-        Visualize the fiber structure of the symbol.
-
+        Plot the cotangent fiber structure at a fixed spatial point (x₀[, y₀]).
+    
+        This visualization shows how the symbol p(x, ξ) behaves on the cotangent fiber 
+        above a fixed spatial point. In microlocal analysis, this provides insight into 
+        the frequency content of the operator at that location.
+    
         Parameters
         ----------
-        x_grid, xi_grid : np.ndarray
-            Spatial and frequency grids.
-        x0, y0 : float
-            Spatial position where to visualize the fiber.
+        x_grid : ndarray
+            Spatial grid values (1D) for evaluation in 1D case.
+        xi_grid : ndarray
+            Frequency grid values (1D) for evaluation in both 1D and 2D cases.
+        x0 : float, optional
+            Fixed x-coordinate of the base point in space (1D or 2D).
+        y0 : float, optional
+            Fixed y-coordinate of the base point in space (2D only).
+    
+        Notes
+        -----
+        - In 1D: Displays |p(x, ξ)| over the (x, ξ) phase plane near the fixed point.
+        - In 2D: Fixes (x₀, y₀) and evaluates p(x₀, y₀, ξ, η), showing the fiber over that point.
+        - The color map represents the magnitude of the symbol, highlighting regions where it vanishes or becomes singular.
+    
+        Raises
+        ------
+        NotImplementedError
+            If called in 2D with missing or improperly formatted grids.
         """
         if self.dim == 1:
             X, XI = np.meshgrid(x_grid, xi_grid, indexing='ij')
@@ -648,16 +934,27 @@ class PseudoDifferentialOperator:
 
     def visualize_symbol_amplitude(self, x_grid, xi_grid, y_grid=None, eta_grid=None, xi0=0.0, eta0=0.0):
         """
-        Plot the amplitude of the symbol.
-
+        Display the modulus |p(x, ξ)| or |p(x, y, ξ₀, η₀)| as a color map.
+    
+        This method visualizes the amplitude of the pseudodifferential operator's symbol 
+        in either 1D or 2D spatial configuration. In 2D, the frequency variables are fixed 
+        to specified values (ξ₀, η₀) for visualization purposes.
+    
         Parameters
         ----------
-        x_grid, y_grid : np.ndarray
-            Spatial grids.
-        xi_grid, eta_grid : np.ndarray
-            Frequency grids.
-        xi0, eta0 : float
-            Fixed frequency values for visualization.
+        x_grid, y_grid : ndarray
+            Spatial grids over which to evaluate the symbol. y_grid is optional and used only in 2D.
+        xi_grid, eta_grid : ndarray
+            Frequency grids. In 2D, these define the domain over which the symbol is evaluated,
+            but the visualization fixes ξ = ξ₀ and η = η₀.
+        xi0, eta0 : float, optional
+            Fixed frequency values for slicing in 2D visualization. Defaults to zero.
+    
+        Notes
+        -----
+        - In 1D: Visualizes |p(x, ξ)| over the (x, ξ) grid.
+        - In 2D: Visualizes |p(x, y, ξ₀, η₀)| at fixed frequencies ξ₀ and η₀.
+        - The color intensity represents the magnitude of the symbol, highlighting regions where the symbol is large or small.
         """
         if self.dim == 1:
             X, XI = np.meshgrid(x_grid, xi_grid, indexing='ij')
@@ -682,16 +979,34 @@ class PseudoDifferentialOperator:
 
     def visualize_phase(self, x_grid, xi_grid, y_grid=None, eta_grid=None, xi0=0.0, eta0=0.0):
         """
-        Plot the phase of the symbol.
+        Plot the phase (argument) of the pseudodifferential operator's symbol p(x, ξ) or p(x, y, ξ, η).
+
+        This visualization helps in understanding the oscillatory behavior and regularity 
+        properties of the operator in phase space. The phase is displayed modulo 2π using 
+        a cyclic colormap ('twilight') to emphasize its periodic nature.
 
         Parameters
         ----------
-        x_grid, y_grid : np.ndarray
-            Spatial grids.
-        xi_grid, eta_grid : np.ndarray
-            Frequency grids.
-        xi0, eta0 : float
-            Fixed frequency values for visualization.
+        x_grid : ndarray
+            1D array of spatial coordinates (x).
+        xi_grid : ndarray
+            1D array of frequency coordinates (ξ).
+        y_grid : ndarray, optional
+            2D spatial grid for y-coordinate (in 2D problems). Default is None.
+        eta_grid : ndarray, optional
+            2D frequency grid for η (in 2D problems). Not used directly but kept for API consistency.
+        xi0 : float, optional
+            Fixed value of ξ for slicing in 2D visualization. Default is 0.0.
+        eta0 : float, optional
+            Fixed value of η for slicing in 2D visualization. Default is 0.0.
+
+        Notes:
+        - In 1D: Displays arg(p(x, ξ)) over the (x, ξ) phase plane.
+        - In 2D: Displays arg(p(x, y, ξ₀, η₀)) for fixed frequency values (ξ₀, η₀).
+        - Uses plt.pcolormesh with 'twilight' colormap to represent angles from -π to π.
+
+        Raises:
+        - NotImplementedError: If the spatial dimension is not 1D or 2D.
         """
         if self.dim == 1:
             X, XI = np.meshgrid(x_grid, xi_grid, indexing='ij')
@@ -716,14 +1031,38 @@ class PseudoDifferentialOperator:
 
     def visualize_characteristic_set(self, x_grid, xi_grid, y0=0.0, x0=0.0):
         """
-        Plot the characteristic set of the symbol.
-
+        Visualize the characteristic set of the pseudo-differential symbol, defined as the approximate zero set p(x, ξ) ≈ 0.
+    
+        In microlocal analysis, the characteristic set is the locus of points in phase space (x, ξ) where the symbol p(x, ξ) vanishes,
+        playing a key role in understanding propagation of singularities and wavefronts.
+    
         Parameters
         ----------
-        x_grid, xi_grid : np.ndarray
-            Spatial and frequency grids.
-        x0, y0 : float
-            Spatial position where to analyze the characteristic set.
+        x_grid : ndarray
+            Spatial grid values (1D array) for plotting in 1D or evaluation point in 2D.
+        xi_grid : ndarray
+            Frequency variable grid values (1D array) used to construct the frequency domain.
+        x0 : float, optional
+            Fixed spatial coordinate in 2D case for evaluating the symbol at a specific x position.
+        y0 : float, optional
+            Fixed spatial coordinate in 2D case for evaluating the symbol at a specific y position.
+    
+        Notes
+        -----
+        - For 1D, this method plots the contour of |p(x, ξ)| = ε with ε = 1e-5 over the (x, ξ) plane.
+        - For 2D, it evaluates the symbol at fixed (x₀, y₀) and plots the characteristic set in the (ξ, η) frequency plane.
+        - This visualization helps identify directions of degeneracy or hypoellipticity of the operator.
+    
+        Raises
+        ------
+        NotImplementedError
+            If called on a solver with dimensionality other than 1D or 2D.
+    
+        Displays
+        ------
+        A matplotlib contour plot showing either:
+            - The characteristic curve in the (x, ξ) phase plane (1D),
+            - The characteristic surface slice in the (ξ, η) frequency plane at (x₀, y₀) (2D).
         """
         if self.dim == 1:
             X, XI = np.meshgrid(x_grid, xi_grid, indexing='ij')
@@ -742,20 +1081,39 @@ class PseudoDifferentialOperator:
             plt.title(f'Characteristic Set at x={x0}, y={y0}')
             plt.show()
 
-    
-
     def visualize_dynamic_wavefront(self, x_grid, t_grid, y_grid=None, xi0=5.0, eta0=0.0):
         """
-        Visualize dynamic wave propagation over time.
-
+        Visualize the propagation of a singularity along bicharacteristic curves as a dynamic wavefront.
+    
+        This method generates a 1D or 2D spatial-time plot of a wavefield initialized with a given frequency 
+        (xi₀, η₀). In 1D, it shows u(x, t) = cos(ξ₀x - ξ₀t), representing a right-moving wave. In 2D, it plots  
+        u(x, y, t) = cos(ξ₀x + η₀y - |k|t), where |k| = √(ξ₀² + η₀²), simulating a plane wave propagating in 
+        direction (ξ₀, η₀).
+    
         Parameters
         ----------
-        x_grid, t_grid : np.ndarray
-            Spatial and temporal grids.
-        y_grid : np.ndarray, optional
-            Second spatial dimension (for 2D).
-        xi0, eta0 : float
-            Initial frequency values for wave propagation.
+        x_grid : ndarray
+            1D or 2D array representing the spatial grid in the x-direction.
+        t_grid : ndarray
+            Array of time points used to construct the wave evolution.
+        y_grid : ndarray, optional
+            1D or 2D array for the second spatial dimension (only used in 2D cases).
+        xi0 : float, default=5.0
+            Initial frequency component in the x-direction.
+        eta0 : float, default=0.0
+            Initial frequency component in the y-direction (used in 2D only).
+    
+        Notes
+        -----
+        - In 1D, this visualizes a simple harmonic wave moving at unit speed.
+        - In 2D, the wave propagates with group velocity magnitude |k| = √(ξ₀² + η₀²).
+        - The wavefronts are stationary in time for 2D due to plotting at fixed t = t_grid[0].
+    
+        Displays
+        --------
+        A matplotlib image plot showing:
+            - In 1D: u(x, t) over space-time (x, t)
+            - In 2D: u(x, y) at initial time t = t_grid[0]
         """
         if self.dim == 1:
             X, T = np.meshgrid(x_grid, t_grid)
@@ -778,18 +1136,41 @@ class PseudoDifferentialOperator:
 
     def plot_hamiltonian_flow(self, x0=0.0, xi0=5.0, y0=0.0, eta0=0.0, tmax=1.0, n_steps=100):
         """
-        Integrate and plot the Hamiltonian flow (bicharacteristics of the symbol).
-    
+        Integrate and plot the Hamiltonian trajectories of the symbol in phase space.
+
+        This method numerically integrates the Hamiltonian vector field derived from 
+        the operator's symbol to visualize how singularities propagate under the flow. 
+        It supports both 1D and 2D problems.
+
         Parameters
         ----------
         x0, xi0 : float
-            Initial spatial position and frequency (1D).
-        y0, eta0 : float
-            (2D only) Initial y and η.
+            Initial position and frequency (momentum) in 1D.
+        y0, eta0 : float, optional
+            Initial position and frequency in 2D; defaults to zero.
         tmax : float
-            Final integration time.
+            Final integration time for the ODE solver.
         n_steps : int
-            Number of time steps.
+            Number of time steps used in the integration.
+
+        Notes
+        -----
+        - The Hamiltonian vector field is obtained from the symplectic flow of the symbol.
+        - If the field is complex-valued, only its real part is used for integration.
+        - In 1D, the trajectory is plotted in (x, ξ) phase space.
+        - In 2D, the spatial trajectory (x(t), y(t)) is shown along with instantaneous 
+          momentum vectors (ξ(t), η(t)) using a quiver plot.
+
+        Raises
+        ------
+        NotImplementedError
+            If the spatial dimension is not 1D or 2D.
+
+        Displays
+        --------
+        matplotlib plot
+            Phase space trajectory(ies) showing the evolution of position and momentum 
+            under the Hamiltonian dynamics.
         """
         from scipy.integrate import solve_ivp
         import matplotlib.pyplot as plt
@@ -862,7 +1243,31 @@ class PseudoDifferentialOperator:
 
     def plot_symplectic_vector_field(self, xlim=(-2, 2), klim=(-5, 5), density=30):
         """
-        Plot the symplectic (Hamiltonian) vector field (dx/dt, dxi/dt) for the symbol.
+        Visualize the symplectic vector field (Hamiltonian vector field) associated with the operator's symbol.
+
+        The plotted vector field corresponds to (∂_ξ p, -∂_x p), where p(x, ξ) is the principal symbol 
+        of the pseudo-differential operator. This field governs the bicharacteristic flow in phase space.
+
+        Parameters
+        ----------
+        xlim : tuple of float
+            Range for spatial variable x, as (x_min, x_max).
+        klim : tuple of float
+            Range for frequency variable ξ, as (ξ_min, ξ_max).
+        density : int
+            Number of grid points per axis for the visualization grid.
+
+        Raises
+        ------
+        NotImplementedError
+            If called on a 2D operator (currently only 1D implementation available).
+
+        Notes
+        -----
+        - Only supports one-dimensional operators.
+        - Uses symbolic differentiation to compute ∂_ξ p and ∂_x p.
+        - Numerical evaluation is done via lambdify with NumPy backend.
+        - Visualization uses matplotlib quiver plot to show vector directions.
         """
         x_vals = np.linspace(*xlim, density)
         xi_vals = np.linspace(*klim, density)
@@ -889,7 +1294,34 @@ class PseudoDifferentialOperator:
 
     def visualize_micro_support(self, xlim=(-2, 2), klim=(-10, 10), threshold=1e-3, density=300):
         """
-        Visualize the micro-support: region in (x, ξ) where |symbol(x, ξ)| is small.
+        Visualize the micro-support of the operator by plotting the inverse of the symbol magnitude 1 / |p(x, ξ)|.
+    
+        The micro-support provides insight into the singularities of a pseudo-differential operator 
+        in phase space (x, ξ). Regions where |p(x, ξ)| is small correspond to large values in 1/|p(x, ξ)|,
+        highlighting areas of significant operator influence or singularity.
+    
+        Parameters
+        ----------
+        xlim : tuple
+            Spatial domain limits (x_min, x_max).
+        klim : tuple
+            Frequency domain limits (ξ_min, ξ_max).
+        threshold : float
+            Threshold below which |p(x, ξ)| is considered effectively zero; used for numerical stability.
+        density : int
+            Number of grid points along each axis for visualization resolution.
+    
+        Raises
+        ------
+        NotImplementedError
+            If called on a solver with dimension greater than 1 (only 1D visualization is supported).
+    
+        Notes
+        -----
+        - This method evaluates the symbol p(x, ξ) over a grid and plots its reciprocal to emphasize 
+          regions where the symbol is near zero.
+        - A small constant (1e-10) is added to the denominator to avoid division by zero.
+        - The resulting plot helps identify characteristic sets and wavefront set approximations.
         """
         if self.dim != 1:
             raise NotImplementedError("Only 1D micro-support visualization implemented.")
@@ -908,7 +1340,31 @@ class PseudoDifferentialOperator:
 
     def group_velocity_field(self, xlim=(-2, 2), klim=(-10, 10), density=30):
         """
-        Plot group velocity vector field \nabla_ξ p(x, ξ).
+        Plot the group velocity field ∇_ξ p(x, ξ) for 1D pseudo-differential operators.
+
+        The group velocity represents the speed at which waves of different frequencies propagate 
+        in a dispersive medium. It is defined as the gradient of the symbol p(x, ξ) with respect 
+        to the frequency variable ξ.
+
+        Parameters
+        ----------
+        xlim : tuple of float
+            Spatial domain limits (x-axis).
+        klim : tuple of float
+            Frequency domain limits (ξ-axis).
+        density : int
+            Number of grid points per axis used for visualization.
+
+        Raises
+        ------
+        NotImplementedError
+            If called on a 2D operator, since this visualization is only implemented for 1D.
+
+        Notes
+        -----
+        - This method visualizes the vector field (∂p/∂ξ) in phase space.
+        - Used for analyzing wave propagation properties and dispersion relations.
+        - Requires symbolic expression self.expr depending on x and ξ.
         """
         if self.dim != 1:
             raise NotImplementedError("Only 1D group velocity visualization implemented.")
@@ -933,25 +1389,40 @@ class PseudoDifferentialOperator:
     def animate_singularity(self, xi0=5.0, eta0=0.0, x0=0.0, y0=0.0,
                             tmax=4.0, n_frames=100, projection=None):
         """
-        Animate the motion of a singularity under the Hamiltonian flow.
-    
+        Animate the propagation of a singularity under the Hamiltonian flow.
+
+        This method visualizes how a singularity (x₀, y₀, ξ₀, η₀) evolves in phase space 
+        according to the Hamiltonian dynamics induced by the principal symbol of the operator.
+        The animation integrates the Hamiltonian equations of motion and supports various projections:
+        position (x-y), frequency (ξ-η), or mixed phase space coordinates.
+
         Parameters
         ----------
         xi0, eta0 : float
-            Initial frequency values (eta0 ignored in 1D)
+            Initial frequency components (ξ₀, η₀).
         x0, y0 : float
-            Initial spatial positions (y0 ignored in 1D)
+            Initial spatial coordinates (x₀, y₀).
         tmax : float
-            Total time of animation
+            Total time of integration (final animation time).
         n_frames : int
-            Number of frames in animation
+            Number of frames in the resulting animation.
         projection : str or None
-            'position', 'frequency', 'phase' or None (default: best choice per dimension)
-    
+            Type of projection to display:
+                - 'position' : x vs y (or x alone in 1D)
+                - 'frequency': ξ vs η (or ξ alone in 1D)
+                - 'phase'    : mixed coordinates like x vs ξ or x vs η
+                If None, defaults to 'phase' in 1D and 'position' in 2D.
+
         Returns
         -------
         matplotlib.animation.FuncAnimation
-            Animation object for inline display
+            Animation object that can be displayed interactively in Jupyter notebooks or saved as a video.
+
+        Notes
+        -----
+        - In 1D, only one spatial and one frequency variable are used.
+        - Complex-valued Hamiltonian fields are truncated to their real parts for integration.
+        - Trajectories are shown with both instantaneous position (dot) and full path (dashed line).
         """
         from scipy.integrate import solve_ivp
         import matplotlib.pyplot as plt
@@ -1110,6 +1581,50 @@ class PseudoDifferentialOperator:
                                     xlim=(-2, 2), ylim=(-2, 2),
                                     xi_range=(0.1, 5), eta_range=(-5, 5),
                                     density=100):
+        """
+        Launch an interactive dashboard for symbol exploration using ipywidgets.
+    
+        This function provides a user-friendly interface to visualize various aspects of the pseudo-differential operator's symbol.
+        It supports multiple visualization modes in both 1D and 2D, including group velocity fields, micro-support estimates,
+        symplectic vector fields, symbol amplitude/phase, cotangent fiber structure, characteristic sets, wavefront sets,
+        and Hamiltonian flows.
+    
+        Parameters
+        ----------
+        pseudo_op : PseudoDifferentialOperator
+            The pseudo-differential operator whose symbol is to be analyzed interactively.
+        xlim, ylim : tuple of float
+            Spatial domain limits along x and y axes respectively.
+        xi_range, eta_range : tuple
+            Frequency domain limits along ξ and η axes respectively.
+        density : int
+            Number of points per axis used to construct the evaluation grid. Controls resolution.
+    
+        Notes
+        -----
+        - In 1D mode, sliders control the fixed frequency (ξ₀) and spatial position (x₀).
+        - In 2D mode, additional sliders control the second frequency component (η₀) and second spatial coordinate (y₀).
+        - Visualization updates dynamically as parameters are adjusted via sliders or dropdown menus.
+        - Supported visualization modes:
+            'Group Velocity Field'       : ∇_ξ p(x,ξ) or ∇_{ξ,η} p(x,y,ξ,η)
+            'Micro-Support (1/|p|)'      : Reciprocal of symbol magnitude
+            'Symplectic Vector Field'    : (∇_ξ p, -∇_x p) or similar in 2D
+            'Symbol Amplitude'           : |p(x,ξ)| or |p(x,y,ξ,η)|
+            'Symbol Phase'               : arg(p(x,ξ)) or similar in 2D
+            'Cotangent Fiber'            : Structure of symbol over frequency space at fixed x
+            'Characteristic Set'         : Zero set approximation {p ≈ 0}
+            'Wavefront Set'              : High-frequency singularities detected via symbol interaction
+            'Hamiltonian Flow'           : Trajectories generated by the Hamiltonian vector field
+    
+        Raises
+        ------
+        NotImplementedError
+            If the spatial dimension is not 1D or 2D.
+    
+        Prints
+        ------
+        Interactive matplotlib figures with dynamic updates based on widget inputs.
+        """
         dim = pseudo_op.dim
         expr = pseudo_op.expr
         vars_x = pseudo_op.vars_x
@@ -1249,35 +1764,91 @@ class PseudoDifferentialOperator:
 
 class PDESolver:
     """
-    A PDE solver based on spectral methods using Fourier transforms.
+    A partial differential equation (PDE) solver based on **spectral methods** using Fourier transforms.
 
-    Features:
-        - Handles symbolic PDEs via sympy
-        - Supports 1D and 2D problems
-        - Temporal integration schemes: default exponential time stepping and ETD-RK4
-        - Nonlinear terms handled via pseudo-spectral method
-        - Visualization and analysis tools included
+    This solver supports symbolic specification of PDEs via SymPy and numerical solution using high-order spectral techniques. 
+    It is designed for both **linear and nonlinear time-dependent PDEs**, as well as **stationary pseudo-differential problems**.
+    
+    Key Features:
+    -------------
+    - Symbolic PDE parsing using SymPy expressions
+    - 1D and 2D spatial domains with periodic boundary conditions
+    - Fourier-based spectral discretization with dealiasing
+    - Temporal integration schemes:
+        - Default exponential time stepping
+        - ETD-RK4 (Exponential Time Differencing Runge-Kutta of 4th order)
+    - Nonlinear terms handled through pseudo-spectral evaluation
+    - Built-in tools for:
+        - Visualization of solutions and error surfaces
+        - Symbol analysis of linear and pseudo-differential operators
+        - Microlocal analysis (e.g., wavefront set estimation, Hamiltonian flows)
+        - CFL condition checking and numerical stability diagnostics
 
-    Example usage:
-    >>> from sympy import Function, diff, symbols
+    Supported Operators:
+    --------------------
+    - Linear differential and pseudo-differential operators
+    - Nonlinear terms up to second order in derivatives
+    - Symbolic operator composition and adjoints
+    - Asymptotic inversion of elliptic operators for stationary problems
+
+    Example Usage:
+    --------------
+    >>> from sympy import Function, diff, Eq
+    >>> from matplotlib import pyplot as plt
     >>> u = Function('u')
     >>> t, x = symbols('t x')
-    >>> eq = Eq(diff(u(t,x), t), diff(u(t,x), x, 2) + u(t,x)**2)
+    >>> eq = Eq(diff(u(t, x), t), diff(u(t, x), x, 2) + u(t, x)**2)
     >>> def initial(x): return np.sin(x)
     >>> solver = PDESolver(eq)
     >>> solver.setup(Lx=2*np.pi, Nx=128, Lt=1.0, Nt=1000, initial_condition=initial)
     >>> solver.solve()
     >>> ani = solver.animate()
-    >>> HTML(ani.to_jshtml())
+    >>> HTML(ani.to_jshtml())  # Display animation in Jupyter notebook
     """
     def __init__(self, equation, time_scheme='default', dealiasing_ratio=2/3):
         """
         Initialize the PDE solver with a given equation.
-    
+
+        This method analyzes the input partial differential equation (PDE), 
+        identifies the unknown function and its dependencies, determines whether 
+        the problem is stationary or time-dependent, and prepares symbolic and 
+        numerical structures for solving in spectral space.
+
+        Supported features:
+        - 1D and 2D problems
+        - Time-dependent and stationary equations
+        - Linear and nonlinear terms
+        - Pseudo-differential operators via `psiOp`
+        - Source terms and boundary conditions
+
+        The equation is parsed to extract linear, nonlinear, source, and 
+        pseudo-differential components. Symbolic manipulation is used to derive 
+        the Fourier representation of linear operators when applicable.
+
         Args:
-            equation (sympy.Eq): The PDE to solve.
-            time_scheme (str): 'default' or 'ETD-RK4'
-            dealiasing_ratio (float): Ratio for dealiasing mask (e.g., 2/3)
+            equation (sympy.Eq): The PDE expressed as a SymPy equation.
+            time_scheme (str): Temporal integration scheme; 'default' for exponential 
+                               time-stepping or 'ETD-RK4' for fourth-order exponential 
+                               time differencing Runge–Kutta.
+            dealiasing_ratio (float): Fraction of high-frequency modes to zero out 
+                                     during dealiasing (e.g., 2/3 for standard truncation).
+
+        Attributes initialized:
+        - self.u: the unknown function (e.g., u(t, x))
+        - self.dim: spatial dimension (1 or 2)
+        - self.spatial_vars: list of spatial variables (e.g., [x] or [x, y])
+        - self.is_stationary: boolean indicating if the problem is stationary
+        - self.linear_terms: dictionary mapping derivative orders to coefficients
+        - self.nonlinear_terms: list of nonlinear expressions
+        - self.source_terms: list of source functions
+        - self.pseudo_terms: list of pseudo-differential operator expressions
+        - self.has_psi: boolean indicating presence of pseudo-differential operators
+        - self.fft / self.ifft: appropriate FFT routines based on spatial dimension
+        - self.kx, self.ky: symbolic wavenumber variables for Fourier space
+
+        Raises:
+            ValueError: If the equation does not contain exactly one unknown function,
+                        if unsupported dimensions are detected, or invalid dependencies.
         """
         self.time_scheme = time_scheme # 'default'  or 'ETD-RK4'
         self.dealiasing_ratio = dealiasing_ratio
@@ -1375,12 +1946,39 @@ class PDESolver:
 
     def parse_equation(self, equation):
         """
-        Parse the PDE to separate linear and nonlinear terms.
+        Parse the PDE to separate linear and nonlinear terms, symbolic operators (Op), 
+        source terms, and pseudo-differential operators (psiOp).
+    
+        This method rewrites the input equation in standard form (lhs - rhs = 0),
+        expands it, and classifies each term into one of the following categories:
+        
+        - Linear terms involving derivatives or the unknown function u
+        - Nonlinear terms (products with u, powers of u, etc.)
+        - Symbolic pseudo-differential operators (Op)
+        - Source terms (independent of u)
+        - Pseudo-differential operators (psiOp)
+    
         Args:
-            equation (sympy.Eq): Partial Differential Equation to parse.
+            equation (sympy.Eq): The partial differential equation to be analyzed. 
+                                 Can be provided as an Eq object or a sympy expression.
+    
         Returns:
-            tuple: Dictionary of linear terms, list of nonlinear terms, list of symbolic operator terms (Op),
-                   list of source terms, and list of pseudo-differential operator terms (psiOp).
+            tuple: A 5-tuple containing:
+                - linear_terms (dict): Mapping from derivative/function to coefficient.
+                - nonlinear_terms (list): List of terms classified as nonlinear.
+                - symbol_terms (list): List of (coefficient, symbolic operator) pairs.
+                - source_terms (list): List of terms independent of the unknown function.
+                - pseudo_terms (list): List of (coefficient, pseudo-differential symbol) pairs.
+    
+        Notes:
+            - If `psiOp` is present in the equation, expansion is skipped for safety.
+            - When `psiOp` is used, only nonlinear terms, source terms, and possibly 
+              a time derivative are allowed; other linear terms and symbolic operators 
+              (Op) are forbidden.
+            - Classification logic includes:
+                - Detection of nonlinear structures like products or powers of u
+                - Mixed terms involving both u and its derivatives
+                - External symbolic operators (Op) and pseudo-differential operators (psiOp)
         """
         def is_nonlinear_term(term, u_func):
             if any(arg.has(u_func) for arg in term.args if isinstance(arg, Function) and arg.func != u_func.func):
@@ -1412,7 +2010,7 @@ class PDESolver:
             lhs_expanded = lhs
         else:
             lhs_expanded = expand(lhs)
-        
+    
         print(f"\nExpanded equation: {lhs_expanded}")
     
         linear_terms = {}
@@ -1429,8 +2027,8 @@ class PDESolver:
                 pseudo_terms.append((1, expr))
                 print("  --> Classified as pseudo linear term (psiOp)")
                 continue
-            
-            # Sinon, cherche psiOp à l’intérieur (cas général)
+    
+            # Otherwise, look for psiOp inside (general case)
             if term.has(psiOp):
                 psiops = term.atoms(psiOp)
                 for psi in psiops:
@@ -1440,12 +2038,12 @@ class PDESolver:
                         pseudo_terms.append((coeff, expr))
                         print("  --> Classified as pseudo linear term (psiOp)")
                     except Exception as e:
-                        print(f"  ⚠️  Failed to extract psiOp coefficient in term: {term}")
+                        print(f"  ⚠️ Failed to extract psiOp coefficient in term: {term}")
                         print(f"     Reason: {e}")
                         nonlinear_terms.append(term)
                         print("  --> Fallback: classified as nonlinear")
                 continue
-                
+    
             if term.has(Op):
                 ops = term.atoms(Op)
                 for op in ops:
@@ -1482,34 +2080,66 @@ class PDESolver:
         print(f"Source terms: {source_terms}")
     
         if pseudo_terms:
-            # Vérifie si une dérivée temporelle est présente parmi les termes linéaires
+            # Check if a time derivative is present among the linear terms
             has_time_derivative = any(
                 isinstance(term, Derivative) and self.t in [v for v, _ in term.variable_count]
                 for term in linear_terms
             )
-            # Extrait les termes linéaires non temporels
+            # Extract non-temporal linear terms
             invalid_linear_terms = {
                 term: coeff for term, coeff in linear_terms.items()
                 if not (
                     isinstance(term, Derivative)
                     and self.t in [v for v, _ in term.variable_count]
                 )
-                and term != self.u  # exclusion du terme u simple (sans dérivée)
+                and term != self.u  # exclusion of the simple u term (without derivative)
             }
-
+    
             if invalid_linear_terms or symbol_terms:
                 raise ValueError(
-                    "Lorsque psiOp est utilisé, seuls les termes non-linéaires, les termes source, "
-                    "et éventuellement une dérivée temporelle sont autorisés. "
-                    "Les autres termes linéaires et les Op sont interdits."
+                    "When psiOp is used, only nonlinear terms, source terms, "
+                    "and possibly a time derivative are allowed. "
+                    "Other linear terms and Ops are forbidden."
                 )
     
         return linear_terms, nonlinear_terms, symbol_terms, source_terms, pseudo_terms
 
+
     def compute_linear_operator(self):
         """
-        Compute the linear operator L(k) by applying each derivative to a plane wave.
-        Automatically handles any derivative structure without hardcoding.
+        Compute the symbolic Fourier representation L(k) of the linear operator 
+        derived from the linear part of the PDE.
+    
+        This method constructs a dispersion relation by applying each symbolic derivative
+        to a plane wave exp(i(k·x - ωt)) and extracting the resulting expression.
+        It handles arbitrary derivative combinations and includes symbolic and
+        pseudo-differential terms.
+    
+        Steps:
+        -------
+        1. Construct a plane wave φ(x, t) = exp(i(k·x - ωt)).
+        2. Apply each term from self.linear_terms to φ.
+        3. Normalize by φ and simplify to obtain L(k).
+        4. Include symbolic terms (e.g., psiOp) if present.
+        5. Detect the temporal order from the dispersion relation.
+        6. Build the numerical function L(k) via lambdify.
+    
+        Sets:
+        -----
+        self.L_symbolic : sympy.Expr
+            Symbolic form of L(k).
+        self.L : callable
+            Numerical function of L(kx[, ky]).
+        self.omega : callable or None
+            Frequency root ω(k), if available.
+        self.temporal_order : int
+            Order of time derivatives detected.
+        self.psi_ops : list of (coeff, PseudoDifferentialOperator)
+            Pseudo-differential terms present in the equation.
+    
+        Raises:
+        -------
+        ValueError if the dimension is unsupported or the dispersion relation fails.
         """
         print("\n*******************************")
         print("* Linear operator computation *")
@@ -1807,12 +2437,26 @@ class PDESolver:
             
     def apply_boundary(self, u):
         """
-        Apply periodic boundary conditions.
+        Apply periodic boundary conditions to the solution array.
+
+        This method enforces periodicity by setting boundary values equal to their 
+        corresponding interior points on the opposite side of the domain. It supports 
+        both 1D and 2D grids.
 
         Parameters
         ----------
         u : np.ndarray
-            Solution array.
+            The solution array representing the field values on a spatial grid.
+            In 1D, shape must be (Nx,). In 2D, shape must be (Nx, Ny).
+
+        Notes:
+        - In 1D: u[0] = u[-2], u[-1] = u[1]
+        - In 2D: Periodicity is applied along both x and y directions:
+                 * First and last rows are set equal to their opposite neighbors
+                 * First and last columns are set equal to their opposite neighbors
+
+        Ensures compatibility with spectral methods using Fourier basis which 
+        inherently assume periodic boundary conditions.
         """
         if self.dim == 1:
             u[0] = u[-2]
@@ -1825,12 +2469,25 @@ class PDESolver:
 
     def apply_nonlinear(self, u, is_v=False):
         """
-        Apply nonlinear terms to the solution with dealiasing (spectral differentiation).
-        Args:
-            u (numpy.ndarray): Current solution grid.
-            is_v (bool): Whether to compute nonlinear terms for v.
+        Apply nonlinear terms to the solution using spectral differentiation with dealiasing.
+
+        This method evaluates all nonlinear terms present in the PDE by substituting spatial 
+        derivatives with their spectral approximations computed via FFT. The dealiasing mask 
+        ensures numerical stability by removing high-frequency components that could lead 
+        to aliasing errors.
+
+        Parameters:
+            u (numpy.ndarray): Current solution array on the spatial grid.
+            is_v (bool): If True, evaluates nonlinear terms for the velocity field v instead of u.
+
         Returns:
-            numpy.ndarray: Contribution from nonlinear terms.
+            numpy.ndarray: Array representing the contribution of nonlinear terms multiplied by dt.
+
+        Notes:
+        - In 1D, computes ∂ₓu via FFT and substitutes any derivative term in the nonlinear expressions.
+        - In 2D, computes ∂ₓu and ∂ᵧu via FFT and performs similar substitutions.
+        - Uses lambdify to evaluate symbolic nonlinear expressions numerically.
+        - Derivatives are replaced symbolically with 'u_x' and 'u_y' before evaluation.
         """
         if not self.nonlinear_terms:
             return np.zeros_like(u, dtype=np.complex128)
@@ -1886,7 +2543,26 @@ class PDESolver:
         return nonlinear_term * self.dt
 
     def prepare_symbol_tables(self):
-        """Precompute all psiOp symbols as arrays (real or complex)."""
+        """
+        Precompute and store the numerical arrays associated with all pseudo-differential
+        operators (psiOp) used in the equation.
+    
+        Each psiOp is evaluated on the spatial-frequency grid defined by (X, Y, KX, KY),
+        and the resulting symbolic expressions are converted into complex-valued arrays.
+    
+        This method is dimension-aware and supports both 1D and 2D evaluations. The resulting
+        arrays are stored in self.precomputed_symbols for efficient reuse during the simulation.
+    
+        Sets:
+        -----
+        self.precomputed_symbols : list of (coeff, ndarray)
+            List of coefficient and evaluated symbol array pairs.
+    
+        Raises:
+        -------
+        ValueError
+            If the spatial dimension is not supported (only 1D and 2D are implemented).
+        """
         self.precomputed_symbols = []
         for coeff, psi in self.psi_ops:
             # Evaluate the symbol (can be 1D or 2D)
@@ -1906,16 +2582,36 @@ class PDESolver:
 
     def psiOp_fast(self, u):
         """
-        Apply pseudo-differential operators via precomputed symbols.
-        Automatically switches to Kohn-Nirenberg quantization when symbol depends on spatial variables.
+        Apply pseudo-differential operators to the input field using precomputed symbols.
+    
+        This method applies a pseudo-differential operator to the solution array `u`. It distinguishes between two cases:
+        
+        1. **Spectral multiplier case**: When the symbol of the operator does not depend on spatial variables (i.e., it is purely frequency-dependent), the operator is applied efficiently via Fourier multiplication.
+        
+        2. **Kohn-Nirenberg quantization case**: When the symbol depends on spatial variables (e.g., `x`, `y`), the full Kohn-Nirenberg quantization is used for accurate implementation.
+    
+        The method automatically detects whether any of the symbols depend on spatial variables and selects the appropriate computational path.
+    
         Parameters
         ----------
         u : np.ndarray
-            Input solution array.
+            The input solution array in physical space. Can be one-dimensional (1D) or two-dimensional (2D), depending on the spatial dimension of the problem.
+    
         Returns
         -------
         np.ndarray
-            Updated solution after applying the operator.
+            The updated solution array after applying the pseudo-differential operator, returned in physical space.
+    
+        Notes
+        -----
+        - The spectral multiplier path uses precomputed symbolic values stored in `self.precomputed_symbols` and performs fast convolution via FFT.
+        - The Kohn-Nirenberg path dynamically constructs a callable from the symbolic expression and evaluates the pseudo-differential operator using numerical integration in phase space.
+        - This method assumes that the symbols have already been evaluated and stored during setup via `prepare_symbol_tables`.
+    
+        See Also
+        --------
+        prepare_symbol_tables : Precomputes and stores symbolic arrays for use with this method.
+        kohn_nirenberg_fft : Performs the numerical integration required for general pseudo-differential operators.
         """
         # Check if any symbol depends on spatial variables using symbolic expressions
         use_kohn_nirenberg = False
@@ -1955,11 +2651,63 @@ class PDESolver:
 
     def solve(self):
         """
-        Solve the PDE with the chosen time integration scheme.
-        Handles both first-order and second-order in time equations.
-        Supports:
-            - Default exponential time-stepping (linear propagation + nonlinear correction)
-            - ETD-RK4 (Exponential Time Differencing Runge-Kutta of 4th order)
+        Solve the PDE using the selected time integration scheme.
+    
+        This method evolves the solution forward in time based on the initial conditions,
+        boundary conditions, and the structure of the PDE (linear or nonlinear).
+        It supports both first-order and second-order time evolution equations and offers
+        multiple integration methods:
+        
+            - **Default exponential time-stepping**: Suitable for linear-dominated problems.
+            - **ETD-RK4 (Exponential Time Differencing with 4th order Runge-Kutta)**: 
+              A high-order method for stiff systems, especially useful when nonlinear terms are present.
+            - **Leap-Frog method**: A second-order explicit scheme used when pseudo-differential operators (ψOp) are present.
+    
+        The solver also handles optional source terms that may depend on space and time,
+        and optionally records the solution at regular intervals for animation or analysis.
+        Energy conservation is monitored when applicable.
+    
+        Parameters
+        ----------
+        None
+    
+        Returns
+        -------
+        None
+            The solution is stored internally in `self.frames` at specified intervals.
+            Final state is kept in `self.u_prev` (and `self.v_prev` if second-order in time).
+    
+        Notes
+        -----
+        - First-order equations are solved via exponential propagation of the linear part
+          plus a nonlinear correction term. ETD-RK4 can be activated by setting `time_scheme='ETD-RK4'`.
+        - Second-order equations without ψOp use a spectral Fourier-based propagator derived from the dispersion relation.
+        - When ψOp is active, the Leap-Frog method is used for second-order equations.
+        - Source terms are evaluated dynamically at each time step using SymPy lambdification.
+        - Dealising is applied during FFT operations to prevent aliasing errors in nonlinear terms.
+        - Energy is computed and recorded only for second-order linear systems without ψOp.
+    
+        Integration Schemes
+        -------------------
+        - **First-order (default):**
+            u_new = exp(dt * L) * u_prev + dt * N(u_prev)
+            
+        - **First-order (ETD-RK4):**
+            Uses a 4th-order Runge-Kutta formulation in the exponential integrator framework.
+    
+        - **Second-order (no ψOp):**
+            u_new = cos(ω*dt) * u_prev + sin(ω*dt)/ω * v_prev + dt²/2 * N(u_prev)
+            v_new = -ω*sin(ω*dt) * u_prev + cos(ω*dt) * v_prev + dt * N(u_prev)
+    
+        - **Second-order (with ψOp – Leap-Frog):**
+            u^{n+1} = 2u^n - u^{n-1} + dt² * [L(u^n) + N(u^n) + f(x,t)]
+    
+        Example Usage
+        -------------
+        >>> solver.setup(Lx=2*np.pi, Nx=256, Lt=10.0, Nt=1000, initial_condition=initial)
+        >>> solver.solve()
+        >>> ani = solver.animate()
+        >>> HTML(ani.to_jshtml())
         """
         print("\n*******************")
         print("* Solving the PDE *")
@@ -2071,19 +2819,50 @@ class PDESolver:
     
     def solve_stationary_psiOp(self, order=3):
         """
-        Solve P[u] = f(x) or f(x,y) for stationary pseudo-differential problems using asymptotic inversion.
+        Solve stationary pseudo-differential equations of the form P[u] = f(x) or P[u] = f(x,y) using asymptotic inversion.
+    
+        This method computes the solution to a stationary (time-independent) pseudo-differential equation
+        where the operator P is defined via symbolic expressions (psiOp). It constructs an asymptotic right inverse R 
+        such that P∘R ≈ Id, then applies it to the source term f using either direct Fourier multiplication 
+        (when the symbol is spatially independent) or Kohn–Nirenberg quantization (when spatial dependence is present).
+    
+        The inversion is based on the principal symbol of the operator and its asymptotic expansion up to the given order.
+        Ellipticity of the symbol is checked numerically before inversion to ensure well-posedness.
     
         Parameters
         ----------
-        order : int
-            Order of the asymptotic inverse expansion.
-        method : str
-            'diagonal' for fast approximate inverse (default), 'full' for pointwise exact inverse (slower).
+        order : int, default=3
+            Order of the asymptotic expansion used to construct the right inverse of the pseudo-differential operator.
+        method : str, optional
+            Inversion strategy:
+            - 'diagonal' (default): Fast approximate inversion using diagonal operators in frequency space.
+            - 'full'                : Pointwise exact inversion (slower but more accurate).
     
         Returns
         -------
         ndarray
-            The solution u(x) or u(x, y)
+            The computed solution u(x) in 1D or u(x, y) in 2D as a NumPy array over the spatial grid.
+    
+        Raises
+        ------
+        ValueError
+            If no pseudo-differential operator (psiOp) is defined.
+            If linear or nonlinear terms other than psiOp are present.
+            If the symbol is not elliptic on the grid.
+            If no source term is provided for the right-hand side.
+    
+        Notes
+        -----
+        - The method assumes the problem is fully stationary: time derivatives must be absent.
+        - Requires the equation to be purely pseudo-differential (no Op, Derivative, or nonlinear terms).
+        - Symbol evaluation and inversion are dimension-aware (supports both 1D and 2D problems).
+        - Supports optimization paths when the symbol does not depend on spatial variables.
+    
+        See Also
+        --------
+        right_inverse_asymptotic : Constructs the asymptotic inverse of the pseudo-differential operator.
+        kohn_nirenberg_fft          : Numerical implementation of general pseudo-differential operators.
+        is_elliptic_numerically   : Verifies numerical ellipticity of the symbol.
         """
         if not self.has_psi:
             raise ValueError("Only supports problems with psiOp.")
@@ -2182,27 +2961,45 @@ class PDESolver:
                            space_window=False):
         """
         Numerically stable Kohn–Nirenberg quantization of a pseudo-differential operator.
+        
+        Applies the pseudo-differential operator Op(p) to the function f via the Kohn–Nirenberg quantization:
+        
+            [Op(p)f](x) = (1/(2π)^d) ∫ p(x, ξ) e^{ix·ξ} ℱ[f](ξ) dξ
+        
+        where p(x, ξ) is a symbol that may depend on both spatial variables x and frequency variables ξ.
+        
+        This method supports both 1D and 2D cases and includes optional smoothing techniques to improve numerical stability.
     
         Parameters
         ----------
         f_vals : np.ndarray
-            Spatial samples of the input function f(x) or f(x, y).
+            Spatial samples of the input function f(x) or f(x, y), defined on a uniform grid.
         symbol_func : callable
-            Symbol function p(x, ξ) in 1D or p(x, y, ξ, η) in 2D.
-            Must be a NumPy-compatible function (e.g., via lambdify).
+            A function representing the full symbol p(x, ξ) in 1D or p(x, y, ξ, η) in 2D.
+            Must accept NumPy-compatible array inputs and return a complex-valued array.
         freq_window : {'gaussian', 'hann', None}, optional
-            Type of frequency-domain window to apply to smooth out oscillations and suppress aliasing.
+            Type of frequency-domain window to apply:
+            - 'gaussian': smooth decay near high frequencies
+            - 'hann': cosine-based tapering with hard cutoff
+            - None: no frequency window applied
         clamp : float, optional
-            Maximum absolute value allowed for the symbol. Helps prevent numerical blow-up.
+            Upper bound on the absolute value of the symbol. Prevents numerical blow-up from large values.
         space_window : bool, optional
-            Whether to apply a spatial Gaussian window to regularize edge behavior.
+            Whether to apply a spatial Gaussian window to suppress edge effects in physical space.
     
         Returns
         -------
         np.ndarray
-            Output array corresponding to Op(p)[f], same shape as f_vals.
-        """
+            The result of applying the pseudo-differential operator to f, returned as a real or complex array
+            of the same shape as f_vals.
     
+        Notes
+        -----
+        - The implementation uses FFT-based quadrature of the inverse Fourier transform.
+        - Symbol evaluation is vectorized over spatial and frequency grids.
+        - Frequency and spatial windows help mitigate oscillatory behavior and aliasing.
+        - In 2D, the integration is performed over a 4D tensor product grid (x, y, ξ, η).
+        """
         # === Common setup ===
         xg = self.x_grid
         dx = xg[1] - xg[0]
@@ -2314,13 +3111,45 @@ class PDESolver:
            
     def step_ETD_RK4(self, u):
         """
-        Perform one ETD-RK4 time step for first-order time PDEs.
+        Perform one Exponential Time Differencing Runge-Kutta of 4th order (ETD-RK4) time step 
+        for first-order in time PDEs of the form:
         
+            ∂ₜu = L u + N(u)
+        
+        where L is a linear operator (possibly nonlocal or pseudo-differential), and N is a 
+        nonlinear term treated via pseudo-spectral methods. This method evaluates the 
+        exponential integrator up to fourth-order accuracy in time.
+    
+        The ETD-RK4 scheme uses four stages to approximate the integral of the variation-of-constants formula:
+        
+            uⁿ⁺¹ = e^(L Δt) uⁿ + Δt ∫₀¹ e^(L Δt (1 - τ)) φ(N(u(τ))) dτ
+        
+        where φ denotes the nonlinear contributions evaluated at intermediate stages.
+    
         Args:
-            u (np.ndarray): Current solution in real space
-        
+            u (np.ndarray): Current solution in real space (physical grid values).
+    
         Returns:
-            np.ndarray: Updated solution in real space
+            np.ndarray: Updated solution in real space after one ETD-RK4 time step.
+    
+        Notes:
+        - The linear part L is diagonal in Fourier space and precomputed as self.L(k).
+        - Nonlinear terms are evaluated in physical space and transformed via FFT.
+        - The functions φ₁(z) and φ₂(z) are entire functions arising from the ETD scheme:
+          
+              φ₁(z) = (eᶻ - 1)/z   if z ≠ 0
+                     = 1            if z = 0
+    
+              φ₂(z) = (eᶻ - 1 - z)/z²   if z ≠ 0
+                     = ½              if z = 0
+    
+        - This implementation assumes periodic boundary conditions and uses spectral differentiation via FFT.
+        - See Hochbruck & Ostermann (2010) for theoretical background on exponential integrators.
+    
+        See Also:
+            step_ETD_RK4_order2 : For second-order in time equations.
+            psiOp_fast           : For applying pseudo-differential operators.
+            apply_nonlinear      : For handling nonlinear terms in the PDE.
         """
         dt = self.dt
         L_fft = self.L(self.KX) if self.dim == 1 else self.L(self.KX, self.KY)
@@ -2358,17 +3187,32 @@ class PDESolver:
     
         return ifft(u_new_hat)
 
-
     def step_ETD_RK4_order2(self, u, v):
         """
-        Perform one ETD-RK4 time step for second-order time PDEs.
+        Perform one time step of the Exponential Time Differencing Runge-Kutta 4th-order (ETD-RK4) scheme for second-order PDEs.
     
-        Args:
-            u (np.ndarray): Current solution in real space
-            v (np.ndarray): Current derivative in real space
+        This method evolves the solution u and its time derivative v forward in time by one step using the ETD-RK4 integrator. 
+        It is designed for systems of the form:
+        
+            ∂ₜ²u = L u + N(u)
+            
+        where L is a linear operator and N is a nonlinear term computed via self.apply_nonlinear.
+        
+        The exponential integrator handles the linear part exactly in Fourier space, while the nonlinear terms are integrated 
+        using a fourth-order Runge-Kutta-like approach. This ensures high accuracy and stability for stiff systems.
+    
+        Parameters:
+            u (np.ndarray): Current solution array in real space.
+            v (np.ndarray): Current time derivative of the solution (∂ₜu) in real space.
     
         Returns:
-            tuple: Updated (u_new, v_new)
+            tuple: (u_new, v_new), updated solution and its time derivative after one time step.
+    
+        Notes:
+            - Assumes periodic boundary conditions and uses FFT-based spectral methods.
+            - Handles both 1D and 2D problems seamlessly.
+            - Uses phi functions to compute exponential integrators efficiently.
+            - Suitable for wave equations and other second-order evolution equations with stiffness.
         """
         dt = self.dt
     
@@ -2414,12 +3258,33 @@ class PDESolver:
 
     def compute_combined_symbol(self):
         """
-        Evaluate the weighted sum of pseudo-differential symbols on the grid.
-
+        Evaluate the weighted sum of pseudo-differential symbols on the spatial-frequency grid.
+    
+        This method computes the total symbol of a pseudo-differential operator defined as a linear combination of individual operators (self.psi_ops). Each symbol is evaluated over the spatial-frequency grid and multiplied by its respective complex coefficient. The final result is the sum of all scaled symbol arrays.
+    
         Returns
         -------
         np.ndarray
-            Combined symbol values as a complex numpy array.
+            A complex-valued array representing the combined symbol values over the grid.
+            The shape matches the frequency grid: (Nx,) in 1D or (Nx, Ny) in 2D.
+    
+        Raises
+        ------
+        AttributeError
+            If self.psi_ops has not been defined before calling this method.
+    
+        Notes
+        -----
+        - Symbolic coefficients are converted to complex numbers using sympy.N().
+        - Symbols are evaluated using the current spatial grid (self.X, self.Y) and frequency grid (self.KX, self.KY).
+        - Supports both 1D and 2D configurations.
+        - Used primarily during time-stepping to precompute operator values when applying exponential integrators or spectral methods.
+    
+        See Also
+        --------
+        PseudoDifferentialOperator.evaluate : Evaluates a single symbol on the grid.
+        prepare_symbol_tables : Precomputes and stores symbols for efficiency.
+        psiOp_fast : Applies the symbol in the time-stepping loop.
         """
         from sympy import N
     
@@ -2448,7 +3313,27 @@ class PDESolver:
 
     def check_cfl_condition(self):
         """
-        Check the CFL condition based on group velocity for second-order PDEs.
+        Check the CFL (Courant–Friedrichs–Lewymann) condition based on group velocity 
+        for second-order time-dependent PDEs.
+    
+        This method verifies whether the chosen time step dt satisfies the numerical stability 
+        condition derived from the maximum wave propagation speed in the system. It supports both 
+        1D and 2D problems, with or without a symbolic dispersion relation ω(k).
+    
+        The CFL condition ensures that information does not propagate further than one grid cell 
+        per time step. A safety factor of 0.5 is applied by default to ensure robustness.
+    
+        Notes:
+        - In 1D, the group velocity v₉(k) = dω/dk is used to compute the maximum wave speed.
+        - In 2D, the x- and y-directional group velocities are evaluated independently.
+        - If no dispersion relation is available, the imaginary part of the linear operator L(k) 
+          is used as an approximation for wave speed.
+    
+        Raises:
+        - NotImplementedError: If the spatial dimension is not 1D or 2D.
+    
+        Prints:
+        - Warning message if the current time step dt exceeds the CFL-stable limit.
         """
         print("\n*****************")
         print("* CFL condition *")
@@ -2496,15 +3381,52 @@ class PDESolver:
         else:
             raise NotImplementedError("Only 1D and 2D problems are supported.")
 
-
     def check_symbol_conditions(self, k_range=None, verbose=True):
         """
-        Check strict conditions on self.L_symbolic:
-            - Stability: Re(a(k)) ≤ 0
-            - Dissipation: Re(a(k)) ≤ -δ |k|^p
-            - Growth: |a(k)| ≤ C (1 + |k|)^m
+        Check strict analytic conditions on the linear symbol self.L_symbolic:
+        
+            This method evaluates three key properties of the Fourier multiplier 
+            symbol a(k) = self.L(k), which are crucial for well-posedness, stability,
+            and numerical efficiency. The checks apply to both 1D and 2D cases.
+        
+        Conditions checked:
+        ------------------
+        1. **Stability condition**: Re(a(k)) ≤ 0 for all k ≠ 0
+           Ensures that the system does not exhibit exponential growth in time.
     
-        Works for both 1D and 2D cases.
+        2. **Dissipation condition**: Re(a(k)) ≤ -δ |k|² for large |k|
+           Ensures sufficient damping at high frequencies to avoid oscillatory instability.
+    
+        3. **Growth condition**: |a(k)| ≤ C (1 + |k|)^m with m ≤ 4
+           Ensures that the symbol does not grow too rapidly with frequency, 
+           which would otherwise cause numerical instability or unphysical amplification.
+    
+        Parameters:
+        -----------
+        k_range : tuple or None, optional
+            Specifies the range of frequencies to test in the form (k_min, k_max, N).
+            If None, defaults are used: [-10, 10] with 500 points in 1D, or [-10, 10] 
+            with 100 points per axis in 2D.
+    
+        verbose : bool, default=True
+            If True, prints detailed results of each condition check.
+    
+        Returns:
+        --------
+        None
+            Output is printed directly to the console for interpretability.
+    
+        Notes:
+        ------
+        - In 2D, the radial frequency |k| = √(kx² + ky²) is used for comparisons.
+        - The dissipation threshold assumes δ = 0.01 and p = 2 by default.
+        - The growth ratio is compared against |k|⁴; values above 100 indicate rapid growth.
+        - This function is typically called during solver setup or analysis phase.
+    
+        See Also:
+        ---------
+        analyze_wave_propagation : For further symbolic and numerical analysis of dispersion.
+        plot_symbol : Visualizes the symbol's behavior over the frequency domain.
         """
         import numpy as np
         from sympy import lambdify, symbols
@@ -2577,11 +3499,28 @@ class PDESolver:
 
     def analyze_wave_propagation(self):
         """
-        Analyze wave propagation properties:
-        - Dispersion relation ω(k)
-        - Phase velocity v_p(k) = ω/|k|
-        - Group velocity v_g(k) = ∇ₖ ω(k)
-        - Anisotropy (in 2D)
+        Perform a detailed analysis of wave propagation characteristics based on the dispersion relation ω(k).
+    
+        This method visualizes key wave properties in both 1D and 2D settings:
+        - Dispersion relation: ω(k)
+        - Phase velocity: v_p(k) = ω(k)/|k|
+        - Group velocity: v_g(k) = ∇ₖ ω(k)
+        - Anisotropy in 2D (via magnitude of group velocity)
+    
+        The symbolic dispersion relation 'omega_symbolic' must be defined beforehand.
+        This is typically available only for second-order-in-time equations.
+    
+        In 1D:
+            Plots ω(k), v_p(k), and v_g(k) over a range of k values.
+    
+        In 2D:
+            Displays heatmaps of ω(kx, ky), v_p(kx, ky), and |v_g(kx, ky)| over a 2D wavenumber grid.
+    
+        Raises:
+            AttributeError: If 'omega_symbolic' is not defined, the method exits gracefully with a message.
+    
+        Side Effects:
+            Generates and displays matplotlib plots.
         """
         print("\n*****************************")
         print("* Wave propagation analysis *")
@@ -2664,12 +3603,35 @@ class PDESolver:
         
     def plot_symbol(self, component="abs", k_range=None, cmap="viridis"):
         """
-        Visualise le symbole L_symbolic en 1D ou 2D.
+        Visualize the spectral symbol L(k) or L(kx, ky) in 1D or 2D.
     
-        Args:
-            component: 'abs', 're', ou 'im'
-            k_range: (kmin, kmax, N), optionnel
-            cmap: colormap matplotlib (2D)
+        This method plots the linear operator's symbolic Fourier representation 
+        either as a function of a single wavenumber k (1D), or two wavenumbers 
+        kx and ky (2D). The user can choose to display the real part, imaginary part, 
+        or absolute value of the symbol.
+    
+        Parameters:
+            component : str {'abs', 're', 'im'}
+                Component of the symbol to visualize:
+                    - 'abs' : absolute value |a(k)|
+                    - 're'  : real part Re[a(k)]
+                    - 'im'  : imaginary part Im[a(k)]
+            k_range : tuple (kmin, kmax, N), optional
+                Wavenumber range for evaluation:
+                    - kmin: minimum wavenumber
+                    - kmax: maximum wavenumber
+                    - N: number of sampling points
+                If None, defaults to [-10, 10] with high resolution.
+            cmap : str, optional
+                Colormap used for 2D surface plots. Default is 'viridis'.
+    
+        Raises:
+            ValueError: If the spatial dimension is not 1D or 2D.
+    
+        Notes:
+            - In 1D, the symbol is plotted using a standard 2D line plot.
+            - In 2D, a 3D surface plot is generated with color-mapped height.
+            - Symbol evaluation uses self.L(k), which must be defined and callable.
         """
         print("\n*******************")
         print("* Symbol plotting *")
@@ -2741,9 +3703,23 @@ class PDESolver:
 
     def compute_energy(self):
         """
-        Compute total energy of the wave equation:
-            E(t) = 1/2 ∫ [ (∂_t u)^2 + |L^{1/2} u|^2 ] dx
-        Supports 1D and 2D cases. Only meaningful if temporal_order == 2.
+        Compute the total energy of the wave equation solution for second-order temporal PDEs. 
+        The energy is defined as:
+            E(t) = 1/2 ∫ [ (∂ₜu)² + |L¹ᐟ²u|² ] dx
+        where L is the linear operator associated with the spatial part of the PDE,
+        and L¹ᐟ² denotes its square root in Fourier space.
+    
+        This method supports both 1D and 2D problems and is only meaningful when 
+        self.temporal_order == 2 (second-order time derivative).
+    
+        Returns:
+        - float or None: Total energy at current time step. Returns None if the 
+          temporal order is not 2 or if no valid velocity data (v_prev) is available.
+    
+        Notes:
+        - Uses FFT-based spectral differentiation to compute the spatial contributions.
+        - Assumes periodic boundary conditions.
+        - Handles both real and complex-valued solutions.
         """
         if self.temporal_order != 2 or self.v_prev is None:
             return None
@@ -2784,11 +3760,23 @@ class PDESolver:
 
     def plot_energy(self, log=False):
         """
-        Plot the evolution of energy over time.
-        Supports both 1D and 2D wave simulations (requires temporal_order=2).
+        Plot the time evolution of the total energy for wave equations. 
+        Visualizes the energy computed during simulation for both 1D and 2D cases. 
+        Requires temporal_order=2 and prior execution of compute_energy() during solve().
         
-        Args:
-            log (bool): if True, plot energy on a logarithmic scale.
+        Parameters:
+            log : bool
+                If True, displays energy on a logarithmic scale to highlight exponential decay/growth.
+        
+        Notes:
+            - Energy is defined as E(t) = 1/2 ∫ [ (∂ₜu)² + |L¹⸍²u|² ] dx
+            - Only available if energy monitoring was activated in solve()
+            - Automatically skips plotting if no energy data is available
+        
+        Displays:
+            - Time vs. Total Energy plot with grid and legend
+            - Appropriate axis labels and dimensional context (1D/2D)
+            - Logarithmic or linear scaling based on input parameter
         """
         if not hasattr(self, 'energy_history') or not self.energy_history:
             print("No energy data recorded. Call compute_energy() within solve().")
@@ -2820,13 +3808,36 @@ class PDESolver:
     def show_stationary_solution(self, u=None, component=r'abs', cmap='viridis'):
         """
         Display the stationary solution computed by solve_stationary_psiOp.
-        
+
+        This method visualizes the solution of a pseudo-differential equation 
+        solved in stationary mode. It supports both 1D and 2D spatial domains, 
+        with options to display different components of the solution (real, 
+        imaginary, absolute value, or phase).
+
         Parameters
         ----------
         u : ndarray, optional
-            Precomputed solution array. If None, calls solve_stationary_psiOp().
+            Precomputed solution array. If None, calls solve_stationary_psiOp() 
+            to compute the solution.
+        component : str, optional {'real', 'imag', 'abs', 'angle'}
+            Component of the complex-valued solution to display:
+            - 'real': Real part
+            - 'imag': Imaginary part
+            - 'abs' : Absolute value (modulus)
+            - 'angle' : Phase (argument)
         cmap : str, optional
-            Colormap to use for 2D display (default: 'viridis')
+            Colormap used for 2D visualization (default: 'viridis').
+
+        Raises
+        ------
+        ValueError
+            If an invalid component is specified or if the spatial dimension 
+            is not supported (only 1D and 2D are implemented).
+
+        Notes
+        -----
+        - In 1D, the solution is displayed using a standard line plot.
+        - In 2D, the solution is visualized as a 3D surface plot.
         """
         def get_component(u):
             if component == 'real':
@@ -2874,19 +3885,38 @@ class PDESolver:
     
     def animate(self, component='abs', overlay='contour'):
         """
-        Create an animated plot of the solution evolution.
+        Create an animated plot of the solution evolution over time.
+
+        This method generates a dynamic visualization of the solution array `self.frames`, 
+        animating either the real part, imaginary part, absolute value, or complex angle 
+        of the field. It supports both 1D line plots and 2D surface plots with optional 
+        contour overlays.
 
         Parameters
         ----------
-        component : str {'real', 'imag', 'abs', 'angle'}
-            Component of the solution to animate.
-        overlay : str {'contour', 'front'}, optional
-            Overlay type in 2D animations.
+        component : str in {'real', 'imag', 'abs', 'angle'}
+            The component of the solution to visualize:
+            - 'real' : Real part Re(u)
+            - 'imag' : Imaginary part Im(u)
+            - 'abs' : Absolute value |u|
+            - 'angle' : Complex argument arg(u)
+
+        overlay : str in {'contour', 'front'}, optional
+            Type of overlay for 2D animations:
+            - 'contour' : Adds contour lines beneath the surface at each frame.
+            - 'front' : (Not implemented here) Could be used for tracking wavefronts.
 
         Returns
         -------
         FuncAnimation
-            Animation object.
+            A Matplotlib `FuncAnimation` object that can be displayed or saved as a video.
+
+        Notes
+        -----
+        - Uses linear interpolation to map simulation frames to target animation frames.
+        - In 2D, the z-axis dynamically rescales based on current data range.
+        - For 'angle' component, color scaling is fixed between -π and π for consistency.
+        - The animation interval is fixed at 50 ms per frame for smooth playback.
         """
         def get_component(u):
             if component == 'real':
@@ -2975,21 +4005,45 @@ class PDESolver:
     def test(self, u_exact, t_eval=None, norm='relative', threshold=1e-2, plot=True, component='real'):
         """
         Test the solver against an exact solution.
-    
+
+        This method quantitatively compares the numerical solution with a provided exact solution 
+        at a specified time using either relative or absolute error norms. It supports both 
+        stationary and time-dependent problems in 1D and 2D. If enabled, it also generates plots 
+        of the solution, exact solution, and pointwise error.
+
         Parameters
         ----------
         u_exact : callable
-            Exact solution function.
+            Exact solution function taking spatial coordinates and optionally time as arguments.
         t_eval : float, optional
-            Time at which to compare (ignored if stationary).
+            Time at which to compare solutions. For non-stationary problems, defaults to final time Lt.
+            Ignored for stationary problems.
         norm : str {'relative', 'absolute'}
-            Type of error norm.
+            Type of error norm used in comparison.
         threshold : float
-            Acceptable error threshold.
+            Acceptable error threshold; raises an assertion if exceeded.
         plot : bool
-            Whether to display plots.
+            Whether to display visual comparison plots (default: True).
         component : str {'real', 'imag', 'abs'}
-            Component to compare.
+            Component of the solution to compare and visualize.
+
+        Raises
+        ------
+        ValueError
+            If unsupported dimension is encountered or requested evaluation time exceeds simulation duration.
+        AssertionError
+            If computed error exceeds the given threshold.
+
+        Prints
+        ------
+        - Information about the closest available frame to the requested evaluation time.
+        - Computed error value and comparison to threshold.
+
+        Notes
+        -----
+        - For time-dependent problems, the solution is extracted from precomputed frames.
+        - Plots are adapted to spatial dimension: line plots for 1D, image plots for 2D.
+        - The method ensures consistent handling of real, imaginary, and magnitude components.
         """
         if self.is_stationary:
             print("Testing a stationary solution.")
