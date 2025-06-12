@@ -73,6 +73,7 @@ Example Usage
 import numpy as np
 import matplotlib.pyplot as plt
 from scipy.fft import fft2, ifft2, fft, ifft, fftfreq, fftshift, ifftshift
+from scipy.signal.windows import hann
 from sympy import (
     symbols, Function, 
     solve, pprint, Mul,
@@ -111,7 +112,9 @@ class Op(Function):
 
 
 class psiOp(Function):
-    """Symbolic wrapper for PseudoDifferentialOperator"""
+    """Symbolic wrapper for PseudoDifferentialOperator.
+    Usage: psiOp(symbol_expr, u)
+    """
     nargs = 2   # (expr, u)
 
 class PseudoDifferentialOperator:
@@ -2271,170 +2274,424 @@ class PDESolver:
         u_hat *= self.dealiasing_mask
         return self.ifft(u_hat)
 
-
     def setup(self, Lx, Ly=None, Nx=None, Ny=None, Lt=1.0, Nt=100,
               initial_condition=None, initial_velocity=None, n_frames=100):
         """
-        Set up the computational grid, initial conditions, and parameters.
-
+        Configure the spatial/temporal grid and initialize the solution field.
+    
+        This method sets up the computational domain, initializes spatial and temporal grids,
+        applies boundary conditions, and prepares symbolic and numerical operators.
+        It also performs essential analyses such as:
+        
+            - CFL condition verification (for stability)
+            - Symbol analysis (e.g., dispersion relation, regularity)
+            - Wave propagation analysis for second-order equations
+    
+        If pseudo-differential operators (ψOp) are present, symbolic analysis is skipped
+        in favor of interactive exploration via `interactive_symbol_analysis`.
+    
         Parameters
         ----------
-        Lx, Ly : float
-            Domain size in x and y directions.
-        Nx, Ny : int
-            Number of spatial points in x and y directions.
-        Lt : float
+        Lx : float
+            Size of the spatial domain along x-axis.
+        Ly : float, optional
+            Size of the spatial domain along y-axis (for 2D problems).
+        Nx : int
+            Number of spatial points along x-axis.
+        Ny : int, optional
+            Number of spatial points along y-axis (for 2D problems).
+        Lt : float, default=1.0
             Total simulation time.
-        Nt : int
+        Nt : int, default=100
             Number of time steps.
         initial_condition : callable
-            Function returning initial condition.
+            Function returning the initial state u(x, 0) or u(x, y, 0).
         initial_velocity : callable, optional
-            Function returning initial velocity (for second-order equations).
-        n_frames : int
-            Number of frames to store during simulation.
+            Function returning the initial time derivative ∂ₜu(x, 0) or ∂ₜu(x, y, 0),
+            required for second-order equations.
+        n_frames : int, default=100
+            Number of time frames to store during simulation for visualization or output.
+    
+        Raises
+        ------
+        ValueError
+            If mandatory parameters are missing (e.g., Nx not given in 1D, Ly/Ny not given in 2D).
+    
+        Notes
+        -----
+        - The spatial discretization assumes periodic boundary conditions by default.
+        - Fourier transforms are computed using real-to-complex FFTs (`scipy.fft.fft`, `fft2`).
+        - Frequency arrays (`KX`, `KY`) are defined following standard spectral conventions.
+        - Dealiasing is applied using a sharp cutoff filter at a fraction of the maximum frequency.
+        - For second-order equations, initial acceleration is derived from the governing operator.
+        - Symbolic analysis includes plotting of the symbol's real/imaginary/absolute values,
+          wavefront propagation, and dispersion relation.
+    
+        See Also
+        --------
+        _setup_1D : Sets up internal variables for one-dimensional problems.
+        _setup_2D : Sets up internal variables for two-dimensional problems.
+        _initialize_conditions : Applies initial data and enforces compatibility.
+        check_cfl_condition : Verifies time step against stability constraints.
+        plot_symbol : Visualizes the linear operator’s symbol in frequency space.
+        analyze_wave_propagation : Analyzes group velocity and wavefront dynamics.
+        interactive_symbol_analysis : Interactive tools for ψOp-based equations.
         """
-
-        # time stepping parameters
+        
+        # Temporal parameters
         self.Lt, self.Nt = Lt, Nt
         self.dt = Lt / Nt
         self.n_frames = n_frames
         self.frames = []
         self.initial_condition = initial_condition
-
-        # check spatial dimension requirements
+    
+        # Dimension checks
         if self.dim == 1:
             if Nx is None:
                 raise ValueError("Nx must be specified in 1D.")
+            self._setup_1D(Lx, Nx)
         else:
             if None in (Ly, Ny):
-                raise ValueError("Both Ly and Ny must be specified in 2D.")
-
-        # 1D grid
-        if self.dim == 1:
-            self.Lx, self.Nx = Lx, Nx
-            self.x_grid = np.linspace(-Lx/2, Lx/2, Nx, endpoint=False)
-            self.X = self.x_grid
-            self.kx = 2 * np.pi * fftfreq(Nx, d=Lx / Nx)
-            self.KX = self.kx
-
-            # dealiasing
-            k_max = self.dealiasing_ratio * np.max(np.abs(self.kx))
-            self.dealiasing_mask = (np.abs(self.KX) <= k_max)
-
-            if self.temporal_order == 2 and not self.has_psi:
-                omega_val = self.omega(self.KX)
-                self.omega_val = omega_val
-                self.cos_omega_dt = np.cos(omega_val * self.dt)
-                self.sin_omega_dt = np.sin(omega_val * self.dt)
-                self.inv_omega = np.zeros_like(omega_val)
-                nonzero = omega_val != 0
-                self.inv_omega[nonzero] = 1.0 / omega_val[nonzero]
-
-            if self.has_psi:
-                self.prepare_symbol_tables()
-            
-            if not self.is_stationary:
-                self.u_prev = initial_condition(self.X)
-
-                if self.temporal_order == 2:
-                    self.v_prev = initial_velocity(self.X) if initial_velocity is not None else np.zeros_like(self.X)
-                
-                    if self.has_psi:
-                        acc0 = self.psiOp_fast(self.u_prev)
-                    else:
-                        acc0 = self.linear_rhs(self.u_prev, is_v=False)
-                
-                    self.u_prev2 = self.u_prev + self.dt * self.v_prev + 0.5 * self.dt**2 * acc0
-
-            
-        # 2D grid
-        else:
-            self.Lx, self.Ly = Lx, Ly
-            self.Nx, self.Ny = Nx, Ny
-            self.x_grid = np.linspace(-Lx/2, Lx/2, Nx, endpoint=False)
-            self.y_grid = np.linspace(-Ly/2, Ly/2, Ny, endpoint=False)
-            self.X, self.Y = np.meshgrid(self.x_grid, self.y_grid, indexing='ij')
-            self.kx = 2 * np.pi * fftfreq(Nx, d=Lx / Nx)
-            self.ky = 2 * np.pi * fftfreq(Ny, d=Ly / Ny)
-            self.KX, self.KY = np.meshgrid(self.kx, self.ky, indexing='ij')
-            kx_max = self.dealiasing_ratio * np.max(np.abs(self.kx))
-            ky_max = self.dealiasing_ratio * np.max(np.abs(self.ky))
-            self.dealiasing_mask = (np.abs(self.KX) <= kx_max) & (np.abs(self.KY) <= ky_max)
-
-            if self.temporal_order == 2 and not self.has_psi:
-                omega_val = self.omega(self.KX, self.KY)
-                self.omega_val = omega_val
-                self.cos_omega_dt = np.cos(omega_val * self.dt)
-                self.sin_omega_dt = np.sin(omega_val * self.dt)
-                self.inv_omega = np.zeros_like(omega_val)
-                nonzero = omega_val != 0
-                self.inv_omega[nonzero] = 1.0 / omega_val[nonzero]
-
-        # If no psiOp, compute linear operator L and its exponential
-        if not self.has_psi:
-            if self.dim == 1:
-                L_vals = np.array(self.L(self.KX), dtype=np.complex128)
-                self.exp_L = np.exp(L_vals * self.dt)
-            else:
-                L_vals = self.L(self.KX, self.KY)
-                self.exp_L = np.exp(L_vals * self.dt)
-
-        if self.has_psi:
-            self.prepare_symbol_tables()
-
-        if not self.is_stationary:
-            # initial condition for u
-            if self.dim == 1:
-                self.u_prev = initial_condition(self.X)
-            else:
-                self.u_prev = initial_condition(self.X, self.Y)
-        
-            self.apply_boundary(self.u_prev)
+                raise ValueError("In 2D, Ly and Ny must be provided.")
+            self._setup_2D(Lx, Ly, Nx, Ny)
     
-            # for second order in time, set initial velocity v_prev
-            if self.temporal_order == 2:
-                if initial_velocity is None:
-                    raise ValueError("Initial velocity must be provided for second-order temporal derivatives")
-                if self.dim == 1:
-                    self.v_prev = initial_velocity(self.X)
-                else:
-                    self.v_prev = initial_velocity(self.X, self.Y)
-
-            if self.temporal_order == 2:
-                if not hasattr(self, 'u_prev2'):
-                    # Compute initial acceleration a0 = L[u0] + nonlinear + source
-                    if self.has_psi:
-                        acc0 = self.psiOp_fast(self.u_prev)
-                    else:
-                        acc0 = self.linear_rhs(self.u_prev, is_v=False)
-            
-                    rhs_nl = self.apply_nonlinear(self.u_prev, is_v=False)
-                    acc0 += rhs_nl
-            
-                    if hasattr(self, 'source_terms') and self.source_terms:
-                        # Evaluate source at t=0 similarly
-                        source_contribution = 0  # (Add source evaluation here if needed)
-                        acc0 += source_contribution
-            
-                    # Initialize u_prev2 by Taylor expansion
-                    self.u_prev2 = self.u_prev + self.dt * self.v_prev + 0.5 * self.dt**2 * acc0
-
-            self.frames = [self.u_prev.copy()]
-
-        
+        # Initialization of solution and velocities
+        if not self.is_stationary:
+            self._initialize_conditions(initial_condition, initial_velocity)
+    
+        # Symbol analysis if present
         if self.has_psi:
-            print("For psiOp, please use the interactive_symbol_analysis method separately")
+            print("⚠️ For psiOp, use interactive_symbol_analysis.")
         else:
             self.check_cfl_condition()
-    
             self.check_symbol_conditions()
-    
             self.plot_symbol()
-    
             if self.temporal_order == 2:
-                self.analyze_wave_propagation()
-            
+                self.analyze_wave_propagation()    
+
+    def _setup_1D(self, Lx, Nx):
+        """
+        Configure internal variables for one-dimensional (1D) problems.
+    
+        This private method initializes spatial and frequency grids, applies dealiasing,
+        and prepares either pseudo-differential symbols or linear operators for use in time evolution.
+        
+        It assumes periodic boundary conditions and uses real-to-complex FFT conventions.
+        The spatial domain is centered at zero: [-Lx/2, Lx/2].
+    
+        Parameters
+        ----------
+        Lx : float
+            Physical size of the spatial domain along the x-axis.
+        Nx : int
+            Number of grid points in the x-direction.
+    
+        Attributes Set
+        --------------
+        self.Lx : float
+            Size of the spatial domain.
+        self.Nx : int
+            Number of spatial points.
+        self.x_grid : np.ndarray
+            1D array of spatial coordinates.
+        self.X : np.ndarray
+            Alias to `self.x_grid`, used in physical space computations.
+        self.kx : np.ndarray
+            Array of wavenumbers corresponding to the Fourier transform.
+        self.KX : np.ndarray
+            Alias to `self.kx`, used in frequency space computations.
+        self.dealiasing_mask : np.ndarray
+            Boolean mask used to suppress aliased frequencies during nonlinear calculations.
+        self.exp_L : np.ndarray
+            Exponential of the linear operator scaled by time step: exp(L(k) · dt).
+        self.omega_val : np.ndarray
+            Frequency values ω(k) = Re[√(L(k))] used in second-order time stepping.
+        self.cos_omega_dt, self.sin_omega_dt : np.ndarray
+            Cosine and sine of ω(k)·dt for dispersive propagation.
+        self.inv_omega : np.ndarray
+            Inverse of ω(k), used to avoid division-by-zero in time stepping.
+    
+        Notes
+        -----
+        - Frequencies are computed using `scipy.fft.fftfreq` and then shifted to center zero frequency.
+        - Dealiasing is applied using a sharp cutoff filter based on `self.dealiasing_ratio`.
+        - If pseudo-differential operators (ψOp) are present, symbolic tables are precomputed via `prepare_symbol_tables`.
+        - For second-order equations, the dispersion relation ω(k) is extracted from the linear operator L(k).
+    
+        See Also
+        --------
+        _setup_2D : Equivalent setup for two-dimensional problems.
+        prepare_symbol_tables : Precomputes symbolic arrays for ψOp evaluation.
+        _setup_omega_terms : Sets up terms involving ω(k) for second-order evolution.
+        """
+        self.Lx, self.Nx = Lx, Nx
+        self.x_grid = np.linspace(-Lx/2, Lx/2, Nx, endpoint=False)
+        self.X = self.x_grid
+        self.kx = 2 * np.pi * fftfreq(Nx, d=Lx / Nx)
+        self.KX = self.kx
+    
+        # Dealiasing mask
+        k_max = self.dealiasing_ratio * np.max(np.abs(self.kx))
+        self.dealiasing_mask = (np.abs(self.KX) <= k_max)
+    
+        # Preparation of symbol or linear operator
+        if self.has_psi:
+            self.prepare_symbol_tables()
+        else:
+            L_vals = np.array(self.L(self.KX), dtype=np.complex128)
+            self.exp_L = np.exp(L_vals * self.dt)
+            if self.temporal_order == 2:
+                omega_val = self.omega(self.KX)
+                self._setup_omega_terms(omega_val)
+    
+    def _setup_2D(self, Lx, Ly, Nx, Ny):
+        """
+        Configure internal variables for two-dimensional (2D) problems.
+    
+        This private method initializes spatial and frequency grids, applies dealiasing,
+        and prepares either pseudo-differential symbols or linear operators for use in time evolution.
+        
+        It assumes periodic boundary conditions and uses real-to-complex FFT conventions.
+        The spatial domain is centered at zero: [-Lx/2, Lx/2] × [-Ly/2, Ly/2].
+    
+        Parameters
+        ----------
+        Lx : float
+            Physical size of the spatial domain along the x-axis.
+        Ly : float
+            Physical size of the spatial domain along the y-axis.
+        Nx : int
+            Number of grid points along the x-direction.
+        Ny : int
+            Number of grid points along the y-direction.
+    
+        Attributes Set
+        --------------
+        self.Lx, self.Ly : float
+            Size of the spatial domain in each direction.
+        self.Nx, self.Ny : int
+            Number of spatial points in each direction.
+        self.x_grid, self.y_grid : np.ndarray
+            1D arrays of spatial coordinates in x and y directions.
+        self.X, self.Y : np.ndarray
+            2D meshgrids of spatial coordinates for physical space computations.
+        self.kx, self.ky : np.ndarray
+            Arrays of wavenumbers corresponding to Fourier transforms in x and y directions.
+        self.KX, self.KY : np.ndarray
+            Meshgrids of wavenumbers used in frequency space computations.
+        self.dealiasing_mask : np.ndarray
+            Boolean mask used to suppress aliased frequencies during nonlinear calculations.
+        self.exp_L : np.ndarray
+            Exponential of the linear operator scaled by time step: exp(L(kx, ky) · dt).
+        self.omega_val : np.ndarray
+            Frequency values ω(kx, ky) = Re[√(L(kx, ky))] used in second-order time stepping.
+        self.cos_omega_dt, self.sin_omega_dt : np.ndarray
+            Cosine and sine of ω(kx, ky)·dt for dispersive propagation.
+        self.inv_omega : np.ndarray
+            Inverse of ω(kx, ky), used to avoid division-by-zero in time stepping.
+    
+        Notes
+        -----
+        - Frequencies are computed using `scipy.fft.fftfreq` and then shifted to center zero frequency.
+        - Dealiasing is applied using a sharp cutoff filter based on `self.dealiasing_ratio`.
+        - If pseudo-differential operators (ψOp) are present, symbolic tables are precomputed via `prepare_symbol_tables`.
+        - For second-order equations, the dispersion relation ω(kx, ky) is extracted from the linear operator L(kx, ky).
+    
+        See Also
+        --------
+        _setup_1D : Equivalent setup for one-dimensional problems.
+        prepare_symbol_tables : Precomputes symbolic arrays for ψOp evaluation.
+        _setup_omega_terms : Sets up terms involving ω(kx, ky) for second-order evolution.
+        """
+        self.Lx, self.Ly = Lx, Ly
+        self.Nx, self.Ny = Nx, Ny
+        self.x_grid = np.linspace(-Lx/2, Lx/2, Nx, endpoint=False)
+        self.y_grid = np.linspace(-Ly/2, Ly/2, Ny, endpoint=False)
+        self.X, self.Y = np.meshgrid(self.x_grid, self.y_grid, indexing='ij')
+        self.kx = 2 * np.pi * fftfreq(Nx, d=Lx / Nx)
+        self.ky = 2 * np.pi * fftfreq(Ny, d=Ly / Ny)
+        self.KX, self.KY = np.meshgrid(self.kx, self.ky, indexing='ij')
+    
+        # Dealiasing mask
+        kx_max = self.dealiasing_ratio * np.max(np.abs(self.kx))
+        ky_max = self.dealiasing_ratio * np.max(np.abs(self.ky))
+        self.dealiasing_mask = (np.abs(self.KX) <= kx_max) & (np.abs(self.KY) <= ky_max)
+    
+        # Preparation of symbol or linear operator
+        if self.has_psi:
+            self.prepare_symbol_tables()
+        else:
+            L_vals = self.L(self.KX, self.KY)
+            self.exp_L = np.exp(L_vals * self.dt)
+            if self.temporal_order == 2:
+                omega_val = self.omega(self.KX, self.KY)
+                self._setup_omega_terms(omega_val)
+    
+    def _setup_omega_terms(self, omega_val):
+        """
+        Initialize terms derived from the angular frequency ω for time evolution.
+    
+        This private method precomputes and stores key trigonometric and inverse quantities
+        based on the dispersion relation ω(k), used in second-order time integration schemes.
+        
+        These values are essential for solving wave-like equations with dispersive behavior:
+            cos(ω·dt), sin(ω·dt), 1/ω
+        
+        The inverse frequency is computed safely to avoid division by zero.
+    
+        Parameters
+        ----------
+        omega_val : np.ndarray
+            Array of angular frequency values ω(k) evaluated at discrete wavenumbers.
+            Can be one-dimensional (1D) or two-dimensional (2D) depending on spatial dimension.
+    
+        Attributes Set
+        --------------
+        self.omega_val : np.ndarray
+            Copy of the input angular frequency array.
+        self.cos_omega_dt : np.ndarray
+            Cosine of ω(k) multiplied by time step: cos(ω(k) · dt).
+        self.sin_omega_dt : np.ndarray
+            Sine of ω(k) multiplied by time step: sin(ω(k) · dt).
+        self.inv_omega : np.ndarray
+            Inverse of ω(k), with zeros where ω(k) == 0 to avoid division by zero.
+    
+        Notes
+        -----
+        - This method is typically called during setup when solving second-order PDEs
+          involving dispersive waves (e.g., Klein-Gordon, Schrödinger, or water wave equations).
+        - The safe computation of 1/ω ensures numerical stability even when low frequencies are present.
+        - These precomputed arrays are used in spectral propagators for accurate time stepping.
+    
+        See Also
+        --------
+        _setup_1D : Sets up internal variables for one-dimensional problems.
+        _setup_2D : Sets up internal variables for two-dimensional problems.
+        solve : Time integration using the computed frequency terms.
+        """
+        self.omega_val = omega_val
+        self.cos_omega_dt = np.cos(omega_val * self.dt)
+        self.sin_omega_dt = np.sin(omega_val * self.dt)
+        self.inv_omega = np.zeros_like(omega_val)
+        nonzero = omega_val != 0
+        self.inv_omega[nonzero] = 1.0 / omega_val[nonzero]
+
+    def _evaluate_source_at_t0(self):
+        """
+        Evaluate source terms at initial time t = 0 over the spatial grid.
+    
+        This private method computes the total contribution of all source terms at the initial time,
+        evaluated across the entire spatial domain. It supports both one-dimensional (1D) and
+        two-dimensional (2D) configurations.
+    
+        Returns
+        -------
+        np.ndarray
+            A numpy array representing the evaluated source term at t=0:
+            - In 1D: Shape (Nx,), evaluated at each x in `self.x_grid`.
+            - In 2D: Shape (Nx, Ny), evaluated at each (x, y) pair in the grid.
+    
+        Notes
+        -----
+        - The symbolic expressions in `self.source_terms` are substituted with numerical values at t=0.
+        - In 1D, each term is evaluated at (t=0, x=x_val).
+        - In 2D, each term is evaluated at (t=0, x=x_val, y=y_val).
+        - Evaluated using SymPy's `evalf()` to ensure numeric conversion.
+        - This method assumes that the source terms have already been lambdified or are compatible with symbolic substitution.
+    
+        See Also
+        --------
+        setup : Initializes the spatial grid and source terms.
+        solve : Uses this evaluation during the first time step.
+        """
+        if self.dim == 1:
+            # Evaluation on the 1D spatial grid
+            return np.array([
+                sum(term.subs(self.t, 0).subs(self.x, x_val).evalf()
+                    for term in self.source_terms)
+                for x_val in self.x_grid
+            ], dtype=np.float64)
+        else:
+            # Evaluation on the 2D spatial grid
+            return np.array([
+                [sum(term.subs({self.t: 0, self.x: x_val, self.y: y_val}).evalf()
+                      for term in self.source_terms)
+                 for y_val in self.y_grid]
+                for x_val in self.x_grid
+            ], dtype=np.float64)
+    
+    def _initialize_conditions(self, initial_condition, initial_velocity):
+        """
+        Initialize the solution and velocity fields at t = 0.
+    
+        This private method sets up the initial state of the solution `u_prev` and, if applicable,
+        the time derivative (velocity) `v_prev` for second-order evolution equations.
+        
+        For second-order equations, it also computes the backward-in-time value `u_prev2`
+        needed by the Leap-Frog method. The acceleration at t = 0 is computed from:
+            ∂ₜ²u = L(u) + N(u) + f(x, t=0)
+        where L is the linear operator, N is the nonlinear term, and f is the source term.
+    
+        Parameters
+        ----------
+        initial_condition : callable
+            Function returning the initial condition u(x, 0) or u(x, y, 0).
+        initial_velocity : callable or None
+            Function returning the initial velocity ∂ₜu(x, 0) or ∂ₜu(x, y, 0). Required for
+            second-order equations; ignored otherwise.
+    
+        Raises
+        ------
+        ValueError
+            If `initial_velocity` is not provided for second-order equations.
+    
+        Notes
+        -----
+        - Applies periodic boundary conditions after setting initial data.
+        - Stores a copy of the initial state in `self.frames` for visualization/output.
+        - In second-order systems, initializes `self.u_prev2` using a Taylor expansion:
+          u_prev2 = u_prev - dt * v_prev + 0.5 * dt² * (∂ₜ²u)
+    
+        See Also
+        --------
+        apply_boundary : Enforces periodic boundary conditions on the solution field.
+        psiOp_apply : Computes pseudo-differential operator action for acceleration.
+        linear_rhs : Evaluates linear part of the equation in Fourier space.
+        apply_nonlinear : Handles nonlinear terms with spectral differentiation.
+        _evaluate_source_at_t0 : Evaluates source terms at the initial time.
+        """
+        # Initial condition
+        if self.dim == 1:
+            self.u_prev = initial_condition(self.X)
+        else:
+            self.u_prev = initial_condition(self.X, self.Y)
+        self.apply_boundary(self.u_prev)
+    
+        # Initial velocity (second order)
+        if self.temporal_order == 2:
+            if initial_velocity is None:
+                raise ValueError("Initial velocity is required for second-order equations.")
+            if self.dim == 1:
+                self.v_prev = initial_velocity(self.X)
+            else:
+                self.v_prev = initial_velocity(self.X, self.Y)
+            self.u0 = np.copy(self.u_prev)
+            self.v0 = np.copy(self.v_prev)
+    
+            # Calculation of u_prev2 (initial acceleration)
+            if not hasattr(self, 'u_prev2'):
+                if self.has_psi:
+                    acc0 = self.apply_psiOp(self.u_prev)
+                else:
+                    acc0 = self.linear_rhs(self.u_prev, is_v=False)
+                rhs_nl = self.apply_nonlinear(self.u_prev, is_v=False)
+                acc0 += rhs_nl
+                if hasattr(self, 'source_terms') and self.source_terms:
+                    acc0 += self._evaluate_source_at_t0()
+                self.u_prev2 = self.u_prev - self.dt * self.v_prev + 0.5 * self.dt**2 * acc0
+    
+        self.frames = [self.u_prev.copy()]
+           
     def apply_boundary(self, u):
         """
         Apply periodic boundary conditions to the solution array.
@@ -2544,28 +2801,38 @@ class PDESolver:
 
     def prepare_symbol_tables(self):
         """
-        Precompute and store the numerical arrays associated with all pseudo-differential
-        operators (psiOp) used in the equation.
+        Precompute and store numerical values of pseudo-differential symbols for efficient reuse.
     
-        Each psiOp is evaluated on the spatial-frequency grid defined by (X, Y, KX, KY),
-        and the resulting symbolic expressions are converted into complex-valued arrays.
+        This method evaluates all pseudo-differential operator symbols (`psi_ops`) on the current spatial-frequency grid.
+        It numerically computes their values and stores them for fast access during time integration or inversion.
+        
+        The results are stored in two attributes:
+            - `self.precomputed_symbols`: List of (coefficient, symbol_array) pairs.
+            - `self.combined_symbol`: Sum of all scaled symbol arrays: Σ (coeff * p(x, ξ)).
     
-        This method is dimension-aware and supports both 1D and 2D evaluations. The resulting
-        arrays are stored in self.precomputed_symbols for efficient reuse during the simulation.
-    
-        Sets:
+        Notes
         -----
-        self.precomputed_symbols : list of (coeff, ndarray)
-            List of coefficient and evaluated symbol array pairs.
+        - Symbols are evaluated over the full spatial-frequency grid defined by `self.X`, `self.Y`, `self.KX`, and `self.KY`.
+        - In 1D, only `self.X` and `self.KX` are used; `Y` and `KY` are ignored.
+        - Symbol expressions are converted to complex-valued NumPy arrays after symbolic evaluation.
+        - This method ensures that repeated evaluations (e.g., in exponential integrators) are fast and consistent.
+        - Used primarily in methods like `psiOp_apply` and `solve_stationary_psiOp`.
     
-        Raises:
-        -------
+        Raises
+        ------
         ValueError
-            If the spatial dimension is not supported (only 1D and 2D are implemented).
+            If the spatial dimension is not supported (i.e., not 1D or 2D).
+    
+        See Also
+        --------
+        psiOp_apply : Applies precomputed symbols efficiently via spectral multiplication.
+        PseudoDifferentialOperator.evaluate : Evaluates a single symbol on a given grid.
+        solve_stationary_psiOp : Uses precomputed symbols to invert stationary equations.
         """
         self.precomputed_symbols = []
+        self.combined_symbol = 0
+    
         for coeff, psi in self.psi_ops:
-            # Evaluate the symbol (can be 1D or 2D)
             if self.dim == 1:
                 raw = psi.evaluate(self.X, None, self.KX, None)
             elif self.dim == 2:
@@ -2573,22 +2840,29 @@ class PDESolver:
             else:
                 raise ValueError("Unsupported spatial dimension.")
     
-            # Robust conversion: handle both 1D and 2D arrays
+            # Flatten and evaluate numerically
             raw_flat = raw.flatten()
             converted = np.array([complex(N(val)) for val in raw_flat], dtype=np.complex128)
             raw_eval = converted.reshape(raw.shape)
-    
             self.precomputed_symbols.append((coeff, raw_eval))
+    
+        # Combine all symbols
+        self.combined_symbol = sum(coeff * sym for coeff, sym in self.precomputed_symbols)
+    
+        # Force final conversion to numpy array of complex numbers
+        self.combined_symbol = np.array(self.combined_symbol, dtype=np.complex128)
 
-    def psiOp_fast(self, u):
+    def apply_psiOp(self, u):
         """
         Apply pseudo-differential operators to the input field using precomputed symbols.
     
         This method applies a pseudo-differential operator to the solution array `u`. It distinguishes between two cases:
-        
-        1. **Spectral multiplier case**: When the symbol of the operator does not depend on spatial variables (i.e., it is purely frequency-dependent), the operator is applied efficiently via Fourier multiplication.
-        
-        2. **Kohn-Nirenberg quantization case**: When the symbol depends on spatial variables (e.g., `x`, `y`), the full Kohn-Nirenberg quantization is used for accurate implementation.
+    
+        1. **Spectral multiplier case**: When the symbol of the operator does not depend on spatial variables (i.e., it is purely frequency-dependent), the operator is applied efficiently via Fourier multiplication:
+           Op(p(D))u = ℱ⁻¹ [p(ξ) · ℱ(u)] 
+           
+        2. **Kohn-Nirenberg quantization case**: When the symbol depends on both spatial and frequency variables (e.g., p(x, ξ)), the full Kohn-Nirenberg quantization is used:
+           Op(p(x,D))u = (1/(2π)^d) ∫ p(x,ξ) eⁱˣ˙ξ ℱ(u)(ξ) dξ
     
         The method automatically detects whether any of the symbols depend on spatial variables and selects the appropriate computational path.
     
@@ -2623,15 +2897,9 @@ class PDESolver:
         if not use_kohn_nirenberg:
             # Fast path: pure spectral multiplier (no x/y dependence)
             u_hat = self.fft(u)
-            combined_symbol = np.zeros_like(u_hat, dtype=np.complex128)
-            for coeff, precomputed_symbol in self.precomputed_symbols:
-                coeff = np.complex128(coeff)
-                symbol = np.array(precomputed_symbol, dtype=np.complex128)
-                combined_symbol += coeff * symbol
-            u_hat *= np.exp(-self.dt * combined_symbol)
+            u_hat *= -self.combined_symbol
             u_hat *= self.dealiasing_mask
             return self.ifft(u_hat)
-    
         else:
             # Slow but accurate path: apply Kohn-Nirenberg quantization
             def build_symbol_func(symbol_expr):
@@ -2646,25 +2914,99 @@ class PDESolver:
             for coeff, expr in self.pseudo_terms:
                 total_symbol += coeff * expr
             symbol_func = build_symbol_func(total_symbol)
-            return self.kohn_nirenberg_fft(f_vals=u, symbol_func=symbol_func)
+            return self.kohn_nirenberg_fft(u_vals=u, symbol_func=symbol_func)
 
+    def apply_psiOp_1t(self, u):
+        """
+        Apply the exponential of a pseudo-differential operator to the input field.
+    
+        This method computes the action of the exponential operator e^{-dt·P(D)} or the full
+        Kohn-Nirenberg quantization of P(x,D) on the solution array `u`, where P is a 
+        pseudo-differential operator defined by its symbol. It distinguishes between two cases:
+    
+        1. **Spectral multiplier case**: When the symbol depends only on frequency variables (ξ or (ξ,η)),
+           the exponential operator is applied efficiently via Fourier multiplication:
+           e^{-dt·P(D)}u = ℱ⁻¹ [exp(-dt·P(ξ)) · ℱ(u)]
+    
+        2. **Kohn-Nirenberg quantization case**: When the symbol also depends on spatial variables (x or (x,y)), 
+           the full Kohn-Nirenberg quantization is used:
+           Op(P(x,D))u = (1/(2π)^d) ∫ P(x, ξ) e^{i x·ξ} ℱ(u)(ξ) dξ
+    
+        The method automatically detects whether any of the symbols depend on spatial variables 
+        and selects the appropriate computational path.
+    
+        Parameters
+        ----------
+        u : np.ndarray
+            The input solution array in physical space. Can be one-dimensional (1D) or 
+            two-dimensional (2D), depending on the spatial dimension of the problem.
+    
+        Returns
+        -------
+        np.ndarray
+            The updated solution array after applying the exponential pseudo-differential operator, 
+            returned in physical space.
+    
+        Notes
+        -----
+        - In the spectral multiplier case, this method uses precomputed symbolic values stored in 
+          `self.combined_symbol` and performs fast convolution via FFT.
+        - In the Kohn-Nirenberg case, the method dynamically constructs a callable from the symbolic 
+          expression and evaluates the exponential operator using numerical integration in phase space.
+        - This method assumes that the symbols have already been evaluated and stored during setup 
+          via `prepare_symbol_tables`.
+    
+        See Also
+        --------
+        prepare_symbol_tables : Precomputes and stores symbolic arrays for use with this method.
+        kohn_nirenberg_fft : Performs the numerical integration required for general pseudo-differential operators.
+        psiOp_apply : Applies a non-exponential pseudo-differential operator directly.
+        """
+        # Check if any symbol depends on spatial variables using symbolic expressions
+        use_kohn_nirenberg = False
+        for coeff, expr in self.pseudo_terms:
+            if expr.has(self.x) or (self.dim == 2 and expr.has(self.y)):
+                use_kohn_nirenberg = True
+                break
+    
+        if not use_kohn_nirenberg:
+            # Fast path: pure spectral multiplier (no x/y dependence)
+            u_hat = self.fft(u)
+            u_hat *= np.exp(-self.dt * self.combined_symbol)
+            u_hat *= self.dealiasing_mask
+            return self.ifft(u_hat)
+        else:
+            # Slow but accurate path: apply Kohn-Nirenberg quantization
+            def build_symbol_func(symbol_expr):
+                if self.dim == 1:
+                    x, xi = symbols('x xi', real=True)
+                    return lambdify((x, xi), symbol_expr, 'numpy')
+                else:
+                    x, y, xi, eta = symbols('x y xi eta', real=True)
+                    return lambdify((x, y, xi, eta), symbol_expr, 'numpy')
+    
+            total_symbol = 0
+            for coeff, expr in self.pseudo_terms:
+                total_symbol += coeff * expr
+            symbol_func = build_symbol_func(total_symbol)
+            return self.kohn_nirenberg_fft(u_vals=u, symbol_func=symbol_func)
 
     def solve(self):
         """
         Solve the PDE using the selected time integration scheme.
     
-        This method evolves the solution forward in time based on the initial conditions,
+        This method evolves the solution forward in time based on initial conditions,
         boundary conditions, and the structure of the PDE (linear or nonlinear).
-        It supports both first-order and second-order time evolution equations and offers
-        multiple integration methods:
-        
+        It supports both first-order and second-order time evolution equations and uses
+        one of several high-order numerical integration schemes:
+    
             - **Default exponential time-stepping**: Suitable for linear-dominated problems.
-            - **ETD-RK4 (Exponential Time Differencing with 4th order Runge-Kutta)**: 
-              A high-order method for stiff systems, especially useful when nonlinear terms are present.
-            - **Leap-Frog method**: A second-order explicit scheme used when pseudo-differential operators (ψOp) are present.
+            - **ETD-RK4 (Exponential Time Differencing with 4th order Runge-Kutta)**:
+              A high-order integrator for stiff systems, especially effective when nonlinear terms are present.
+            - **Leap-Frog method**: A second-order explicit scheme used specifically when pseudo-differential operators (ψOp) are present.
     
         The solver also handles optional source terms that may depend on space and time,
-        and optionally records the solution at regular intervals for animation or analysis.
+        and records the solution at regular intervals for animation or analysis.
         Energy conservation is monitored when applicable.
     
         Parameters
@@ -2690,17 +3032,17 @@ class PDESolver:
         Integration Schemes
         -------------------
         - **First-order (default):**
-            u_new = exp(dt * L) * u_prev + dt * N(u_prev)
-            
+            u_new = e^(dt·L) · u_prev + dt · N(u_prev)
+    
         - **First-order (ETD-RK4):**
             Uses a 4th-order Runge-Kutta formulation in the exponential integrator framework.
     
         - **Second-order (no ψOp):**
-            u_new = cos(ω*dt) * u_prev + sin(ω*dt)/ω * v_prev + dt²/2 * N(u_prev)
-            v_new = -ω*sin(ω*dt) * u_prev + cos(ω*dt) * v_prev + dt * N(u_prev)
+            u_new = cos(ω·dt) · u_prev + (sin(ω·dt)/ω) · v_prev + (dt²/2) · N(u_prev)
+            v_new = -ω · sin(ω·dt) · u_prev + cos(ω·dt) · v_prev + dt · N(u_prev)
     
         - **Second-order (with ψOp – Leap-Frog):**
-            u^{n+1} = 2u^n - u^{n-1} + dt² * [L(u^n) + N(u^n) + f(x,t)]
+            uⁿ⁺¹ = 2uⁿ − uⁿ⁻¹ + dt² [L(uⁿ) + N(uⁿ) + f(x,t)]
     
         Example Usage
         -------------
@@ -2712,7 +3054,7 @@ class PDESolver:
         print("\n*******************")
         print("* Solving the PDE *")
         print("*******************\n")
-        
+    
         save_interval = max(1, self.Nt // self.n_frames)
         self.energy_history = []
     
@@ -2736,7 +3078,7 @@ class PDESolver:
             # First-order in time
             if self.temporal_order == 1:
                 if self.has_psi:
-                    u_sym = self.psiOp_fast(self.u_prev)
+                    u_sym = self.apply_psiOp_1t(self.u_prev)
                     u_nl = self.apply_nonlinear(u_sym)
                     u_new = u_sym + u_nl
                 else:
@@ -2757,31 +3099,14 @@ class PDESolver:
             # Second-order in time
             elif self.temporal_order == 2:
                 if self.has_psi:
-                    # === LEAP-FROG (explicit 2nd-order centered scheme) ===
-            
-                    # Compute spectral multiplier symbol_vals on first call
-                    if step == 0:
-                        self.symbol_vals = self.compute_combined_symbol()
-            
-                    # 1. FFT of u_prev (u^n)
-                    u_hat = self.fft(self.u_prev)
-            
-                    # 2. Apply spectral operator
-                    Lu_hat = -self.symbol_vals * u_hat
-                    Lu_prev = self.ifft(Lu_hat)
-            
-                    # 3. Leap-Frog update: u^{n+1} = 2u^n - u^{n-1} + dt² L(u^n)
-                    u_new = 2 * self.u_prev - self.u_prev2 + self.dt**2 * Lu_prev
-            
-                    # 4. Add optional nonlinear and source terms
+                    Lu_prev = self.apply_psiOp(self.u_prev)
                     rhs_nl = self.apply_nonlinear(self.u_prev, is_v=False)
-                    u_new += self.dt**2 * (rhs_nl + source_contribution)
-            
-                    # 5. Enforce boundary conditions and update
+                    u_new = 2 * self.u_prev - self.u_prev2 + self.dt**2 * (Lu_prev + rhs_nl + source_contribution)
+    
                     self.apply_boundary(u_new)
                     self.u_prev2 = self.u_prev
                     self.u_prev = u_new
-
+                    self.u = u_new
                 else:
                     if hasattr(self, 'time_scheme') and self.time_scheme == 'ETD-RK4':
                         u_new, v_new = self.step_ETD_RK4_order2(self.u_prev, self.v_prev)
@@ -2792,7 +3117,7 @@ class PDESolver:
                         u_new_hat = (self.cos_omega_dt * u_hat +
                                      self.sin_omega_dt * self.inv_omega * v_hat)
                         v_new_hat = (-self.omega_val * self.sin_omega_dt * u_hat +
-                                      self.cos_omega_dt * v_hat)
+                                     self.cos_omega_dt * v_hat)
     
                         u_new = self.ifft(u_new_hat)
                         v_new = self.ifft(v_new_hat)
@@ -2815,8 +3140,8 @@ class PDESolver:
             # Energy monitoring only in linear case without psiOp
             if self.temporal_order == 2 and not self.has_psi:
                 E = self.compute_energy()
-                self.energy_history.append(E)         
-    
+                self.energy_history.append(E)   
+                
     def solve_stationary_psiOp(self, order=3):
         """
         Solve stationary pseudo-differential equations of the form P[u] = f(x) or P[u] = f(x,y) using asymptotic inversion.
@@ -2861,8 +3186,8 @@ class PDESolver:
         See Also
         --------
         right_inverse_asymptotic : Constructs the asymptotic inverse of the pseudo-differential operator.
-        kohn_nirenberg_fft          : Numerical implementation of general pseudo-differential operators.
-        is_elliptic_numerically   : Verifies numerical ellipticity of the symbol.
+        kohn_nirenberg           : Numerical implementation of general pseudo-differential operators.
+        is_elliptic_numerically  : Verifies numerical ellipticity of the symbol.
         """
         if not self.has_psi:
             raise ValueError("Only supports problems with psiOp.")
@@ -2939,7 +3264,7 @@ class PDESolver:
                 print("⚙️  Quantification de Kohn-Nirenberg 1D")
                 x, xi = symbols('x xi', real=True)
                 R_func = lambdify((x, xi), R_symbol, 'numpy')  # Still 2 args for uniformity
-                u = self.kohn_nirenberg_fft(f_vals=rhs, symbol_func=R_func)
+                u = self.kohn_nirenberg_fft(u_vals=rhs, symbol_func=R_func)
                 
         elif self.dim == 2:
             Nx, Ny = self.Nx, self.Ny
@@ -2952,11 +3277,11 @@ class PDESolver:
                 print("⚙️  Quantification de Kohn-Nirenberg 2D")
                 x, xi, y, eta = symbols('x xi y eta', real=True)
                 R_func = lambdify((x, y, xi, eta), R_symbol, 'numpy')  # Still 2 args for uniformity
-                u = self.kohn_nirenberg_fft(f_vals=rhs, symbol_func=R_func)
+                u = self.kohn_nirenberg_fft(u_vals=rhs, symbol_func=R_func)
         self.u = u
         return u
 
-    def kohn_nirenberg_fft(self, f_vals, symbol_func,
+    def kohn_nirenberg_fft(self, u_vals, symbol_func,
                            freq_window='gaussian', clamp=1e6,
                            space_window=False):
         """
@@ -2972,7 +3297,7 @@ class PDESolver:
     
         Parameters
         ----------
-        f_vals : np.ndarray
+        u_vals : np.ndarray
             Spatial samples of the input function f(x) or f(x, y), defined on a uniform grid.
         symbol_func : callable
             A function representing the full symbol p(x, ξ) in 1D or p(x, y, ξ, η) in 2D.
@@ -2991,7 +3316,7 @@ class PDESolver:
         -------
         np.ndarray
             The result of applying the pseudo-differential operator to f, returned as a real or complex array
-            of the same shape as f_vals.
+            of the same shape as u_vals.
     
         Notes
         -----
@@ -3013,7 +3338,7 @@ class PDESolver:
             dk = k[1] - k[0]
     
             # Centered FFT of input
-            f_shift = fftshift(f_vals)
+            f_shift = fftshift(u_vals)
             f_hat = self.fft(f_shift) * dx
             f_hat = fftshift(f_hat)
     
@@ -3064,7 +3389,7 @@ class PDESolver:
             dky = ky[1] - ky[0]
     
             # 2D FFT of f(x, y)
-            f_hat = fftshift(self.fft(f_vals)) * dx * dy
+            f_hat = fftshift(self.fft(u_vals)) * dx * dy
     
             # Create 4D grids for broadcasting
             X, Y = np.meshgrid(self.x_grid, self.y_grid, indexing='ij')
@@ -3108,7 +3433,7 @@ class PDESolver:
             # 2D Fourier inversion (numerical integration)
             u = np.sum(integrand, axis=(2, 3)) * dkx * dky / (2 * np.pi) ** 2
             return u
-           
+
     def step_ETD_RK4(self, u):
         """
         Perform one Exponential Time Differencing Runge-Kutta of 4th order (ETD-RK4) time step 
@@ -3148,7 +3473,7 @@ class PDESolver:
     
         See Also:
             step_ETD_RK4_order2 : For second-order in time equations.
-            psiOp_fast           : For applying pseudo-differential operators.
+            psiOp_apply           : For applying pseudo-differential operators.
             apply_nonlinear      : For handling nonlinear terms in the PDE.
         """
         dt = self.dt
@@ -3284,7 +3609,7 @@ class PDESolver:
         --------
         PseudoDifferentialOperator.evaluate : Evaluates a single symbol on the grid.
         prepare_symbol_tables : Precomputes and stores symbols for efficiency.
-        psiOp_fast : Applies the symbol in the time-stepping loop.
+        psiOp_apply : Applies the symbol in the time-stepping loop.
         """
         from sympy import N
     
