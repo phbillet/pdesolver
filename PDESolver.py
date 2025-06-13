@@ -1242,7 +1242,6 @@ class PseudoDifferentialOperator:
             plt.axis('equal')
             plt.show()
 
-
     def plot_symplectic_vector_field(self, xlim=(-2, 2), klim=(-5, 5), density=30):
         """
         Visualize the symplectic vector field (Hamiltonian vector field) associated with the operator's symbol.
