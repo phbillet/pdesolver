@@ -780,7 +780,6 @@ class PseudoDifferentialOperator:
         min_abs_val = np.min(np.abs(symbol_vals))
         return min_abs_val > threshold
 
-
     def is_self_adjoint(self, tol=1e-10):
         """
         Check whether the pseudo-differential operator is formally self-adjoint (Hermitian).
