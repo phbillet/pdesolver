@@ -250,8 +250,6 @@ class PseudoDifferentialOperator:
             symbol = self.p_func(X, KX)
         elif self.dim == 2:
             symbol = self.p_func(X, Y, KX, KY)
-        else:
-            raise NotImplementedError("Only 1D and 2D supported")
 
         if cache:
             self.symbol_cached = symbol
@@ -292,10 +290,13 @@ class PseudoDifferentialOperator:
         """
 
         p = self.expr
+        print("principal_symbol")
         if self.dim == 1:
+            print("principal_symbol 1D")
             xi = symbols('xi', real=True)
             return simplify(series(p, xi, oo, n=order).removeO())
         elif self.dim == 2:
+            print("principal_symbol 2D")
             xi, eta = symbols('xi eta', real=True)
             # Homogeneous radial expansion: we set (ξ, η) = ρ (cosθ, sinθ)
             rho, theta = symbols('rho theta', real=True)
@@ -382,9 +383,6 @@ class PseudoDifferentialOperator:
             except Exception as e:
                 print(f"2D Order estimation failed: {e}")
             return None
-        
-        else:
-            raise NotImplementedError("Only 1D and 2D are supported.")
 
     def asymptotic_expansion(self, order=3):
         """
@@ -774,11 +772,9 @@ class PseudoDifferentialOperator:
             X, Y, XI, ETA = np.meshgrid(x_vals, y_vals, xi_vals, eta_vals, indexing='ij')
             symbol_vals = self.p_func(X, Y, XI, ETA)
         
-        else:
-            raise NotImplementedError("Only 1D and 2D supported")
-        
         min_abs_val = np.min(np.abs(symbol_vals))
         return min_abs_val > threshold
+
 
     def is_self_adjoint(self, tol=1e-10):
         """
@@ -808,38 +804,6 @@ class PseudoDifferentialOperator:
         p = self.expr
         p_star = self.formal_adjoint()
         return simplify(p - p_star).equals(0)
-
-    def is_homogeneous(self, degree):
-        """
-        Check whether the symbol is homogeneous of a given degree in frequency variables (ξ, η).
-        
-        A function p(ξ) or p(ξ, η) is homogeneous of degree m if p(λξ) = λᵐ p(ξ) for all λ > 0.
-        This method tests this identity symbolically using SymPy.
-
-        Parameters
-        ----------
-        degree : int or float
-            The expected degree of homogeneity m.
-
-        Returns
-        -------
-        bool
-            True if the symbol is homogeneous of the specified degree, False otherwise.
-
-        Notes:
-        - For 1D symbols, checks p(λξ) == λᵐ p(ξ)
-        - For 2D symbols, checks p(λξ, λη) == λᵐ p(ξ, η)
-        - Uses symbolic simplification to verify equality
-        """
-        if self.dim == 1:
-            xi = symbols('xi', real=True)
-            scaling = self.expr.subs(xi, symbols('λ') * xi)
-            return simplify(scaling / self.expr - symbols('λ')**degree).equals(0)
-        else:
-            xi, eta = symbols('xi eta', real=True)
-            lam = symbols('λ')
-            scaled = self.expr.subs({xi: lam * xi, eta: lam * eta})
-            return simplify(scaled / self.expr - lam**degree).equals(0)
 
     def visualize_wavefront(self, x_grid, xi_grid, y_grid=None, eta_grid=None, xi0=0.0, eta0=0.0):
         """
@@ -1242,6 +1206,7 @@ class PseudoDifferentialOperator:
             plt.axis('equal')
             plt.show()
 
+
     def plot_symplectic_vector_field(self, xlim=(-2, 2), klim=(-5, 5), density=30):
         """
         Visualize the symplectic vector field (Hamiltonian vector field) associated with the operator's symbol.
@@ -1576,6 +1541,7 @@ class PseudoDifferentialOperator:
             ani = animation.FuncAnimation(fig, update, frames=n_frames, interval=50)
             plt.close(fig)
             return ani
+
 
     def interactive_symbol_analysis(pseudo_op,
                                     xlim=(-2, 2), ylim=(-2, 2),
@@ -3386,7 +3352,9 @@ class PDESolver:
             dky = ky[1] - ky[0]
     
             # 2D FFT of f(x, y)
-            f_hat = fftshift(self.fft(u_vals)) * dx * dy
+            f_shift = fftshift(u_vals)
+            f_hat = self.fft(f_shift) * dx * dy
+            f_hat = fftshift(f_hat)
     
             # Create 4D grids for broadcasting
             X, Y = np.meshgrid(self.x_grid, self.y_grid, indexing='ij')
