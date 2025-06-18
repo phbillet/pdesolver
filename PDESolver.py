@@ -94,13 +94,15 @@ from sympy.core.function import AppliedUndef
 from IPython.display import display
 from matplotlib import cm
 from matplotlib.animation import FuncAnimation
+import matplotlib.animation as animation
+from matplotlib import rc
 from IPython.display import HTML
 from functools import partial
 from misc import * 
 from scipy.integrate import solve_ivp
 from IPython.display import display
 from ipywidgets import interact, FloatSlider, Dropdown
-
+    
 plt.rcParams['text.usetex'] = False
 FFT_WORKERS = 4
 
@@ -340,8 +342,6 @@ class PseudoDifferentialOperator:
         - The method ignores terms still depending on spatial variables x/y.
         - Robust to symbolic simplification errors via try/except blocks.
         """
-        from sympy import symbols, simplify, series, oo, sqrt, cos, sin, expand
-        
         p = self.expr
         
         if self.dim == 1:
@@ -438,7 +438,6 @@ class PseudoDifferentialOperator:
         elif self.dim == 2:
             xi, eta = symbols('xi eta', real=True)
             rho, theta = symbols('rho theta', real=True)
-            from sympy import cos, sin, sqrt
         
             # Switch to polar coordinates
             p_rho = p.subs({xi: rho * cos(theta), eta: rho * sin(theta)})
@@ -1138,10 +1137,6 @@ class PseudoDifferentialOperator:
             Phase space trajectory(ies) showing the evolution of position and momentum 
             under the Hamiltonian dynamics.
         """
-        from scipy.integrate import solve_ivp
-        import matplotlib.pyplot as plt
-        from sympy import simplify, symbols, lambdify, im
-    
         def make_real(expr):
             """Return the real part of an expression (if complex)."""
             return simplify(expr.as_real_imag()[0])
@@ -1205,7 +1200,6 @@ class PseudoDifferentialOperator:
             plt.grid(True)
             plt.axis('equal')
             plt.show()
-
 
     def plot_symplectic_vector_field(self, xlim=(-2, 2), klim=(-5, 5), density=30):
         """
@@ -1390,12 +1384,6 @@ class PseudoDifferentialOperator:
         - Complex-valued Hamiltonian fields are truncated to their real parts for integration.
         - Trajectories are shown with both instantaneous position (dot) and full path (dashed line).
         """
-        from scipy.integrate import solve_ivp
-        import matplotlib.pyplot as plt
-        import matplotlib.animation as animation
-        from matplotlib import rc
-        from sympy import simplify, symbols, lambdify, im
-    
         rc('animation', html='jshtml')
     
         def make_real(expr):
@@ -1541,7 +1529,6 @@ class PseudoDifferentialOperator:
             ani = animation.FuncAnimation(fig, update, frames=n_frames, interval=50)
             plt.close(fig)
             return ani
-
 
     def interactive_symbol_analysis(pseudo_op,
                                     xlim=(-2, 2), ylim=(-2, 2),
@@ -2176,7 +2163,8 @@ class PDESolver:
             poly_eq = Eq(equation, 0)
             poly = poly_eq.lhs.as_poly(omega)
             self.temporal_order = poly.degree() if poly else 0
-        except:
+        except Exception as e:
+            warnings.warn(f"Could not determine temporal order: {e}", RuntimeWarning)
             self.temporal_order = 0
         print(f"Temporal order from dispersion relation: {self.temporal_order}")
         print('self.pseudo_terms = ', self.pseudo_terms)
@@ -3217,27 +3205,25 @@ class PDESolver:
         f_hat = self.fft(rhs)
     
         if self.dim == 1:
-            Nx = self.Nx
             if not R_symbol.has(x):
-                print("⚡ Optimisation : symbole indépendant de x — produit direct en Fourier.")
+                print("⚡ Optimization: symbol independent of x — direct product in Fourier.")
                 R_vals = R_func(self.KX)
                 u_hat = R_vals * f_hat
                 u = self.ifft(u_hat)
             else:
-                print("⚙️  Quantification de Kohn-Nirenberg 1D")
+                print("⚙️ 1D Kohn-Nirenberg Quantification")
                 x, xi = symbols('x xi', real=True)
                 R_func = lambdify((x, xi), R_symbol, 'numpy')  # Still 2 args for uniformity
                 u = self.kohn_nirenberg_fft(u_vals=rhs, symbol_func=R_func)
                 
         elif self.dim == 2:
-            Nx, Ny = self.Nx, self.Ny
             if not R_symbol.has(x) and not R_symbol.has(y):
-                print("⚡ Optimisation : symbole indépendant de x et y — produit direct en Fourier 2D.")
+                print("⚡ Optimization: Symbol independent of x and y — direct product in 2D Fourier.")
                 R_vals = np.vectorize(R_func)(self.KX, self.KY)
                 u_hat = R_vals * f_hat
                 u = self.ifft(u_hat)
             else:
-                print("⚙️  Quantification de Kohn-Nirenberg 2D")
+                print("⚙️ 2D Kohn-Nirenberg Quantification")
                 x, xi, y, eta = symbols('x xi y eta', real=True)
                 R_func = lambdify((x, y, xi, eta), R_symbol, 'numpy')  # Still 2 args for uniformity
                 u = self.kohn_nirenberg_fft(u_vals=rhs, symbol_func=R_func)
@@ -3510,15 +3496,6 @@ class PDESolver:
         fft = self.fft
         ifft = self.ifft
     
-        def phi1(z):
-            return np.where(np.abs(z) > 1e-12, (np.exp(z) - 1) / z, 1.0)
-    
-        def phi2(z):
-            return np.where(np.abs(z) > 1e-12, (np.exp(z) - 1 - z) / z**2, 0.5)
-    
-        phi1_dtL = phi1(dt * L_fft)
-        phi2_dtL = phi2(dt * L_fft)
-    
         def rhs(u_val):
             return ifft(L_fft * fft(u_val)) + self.apply_nonlinear(u_val, is_v=False)
     
@@ -3535,7 +3512,6 @@ class PDESolver:
         # Stage C
         C = rhs(ub)
         uc = u + dt * vb
-        vc = v + dt * C
     
         # Stage D
         D = rhs(uc)
@@ -3576,8 +3552,6 @@ class PDESolver:
         prepare_symbol_tables : Precomputes and stores symbols for efficiency.
         psiOp_apply : Applies the symbol in the time-stepping loop.
         """
-        from sympy import N
-    
         if not hasattr(self, 'psi_ops'):
             raise AttributeError("psi_ops not defined")
     
@@ -3718,9 +3692,6 @@ class PDESolver:
         analyze_wave_propagation : For further symbolic and numerical analysis of dispersion.
         plot_symbol : Visualizes the symbol's behavior over the frequency domain.
         """
-        import numpy as np
-        from sympy import lambdify, symbols
-
         print("\n********************")
         print("* Symbol condition *")
         print("********************\n")
@@ -3751,7 +3722,6 @@ class PDESolver:
             raise ValueError("Only 1D and 2D dimensions are supported.")
     
         re_vals = np.real(L_vals)
-        im_vals = np.imag(L_vals)
         abs_vals = np.abs(L_vals)
     
         # === Condition 1: Stability
@@ -3779,7 +3749,7 @@ class PDESolver:
         growth_ratio = abs_vals / (1 + k_abs)**4
         if np.max(growth_ratio) > 100:
             if verbose:
-                print(f"⚠️ Symbol grows rapidly: |a(k)| ≳ |k|^4")
+                print("⚠️ Symbol grows rapidly: |a(k)| ≳ |k|^4")
         else:
             if verbose:
                 print("✅ Reasonable spectral growth")
@@ -3818,10 +3788,6 @@ class PDESolver:
         if not hasattr(self, 'omega_symbolic'):
             print("❌ omega_symbolic not defined. Only available for 2nd order in time.")
             return
-    
-        import matplotlib.pyplot as plt
-        from sympy import lambdify
-        import numpy as np
     
         if self.dim == 1:
             k = self.k_symbols[0]
@@ -4072,8 +4038,6 @@ class PDESolver:
             print("No energy data recorded. Call compute_energy() within solve().")
             return
     
-        import matplotlib.pyplot as plt
-    
         # Time vector for plotting
         t = np.linspace(0, self.Lt, len(self.energy_history))
     
@@ -4095,7 +4059,7 @@ class PDESolver:
         plt.tight_layout()
         plt.show()
 
-    def show_stationary_solution(self, u=None, component=r'abs', cmap='viridis'):
+    def show_stationary_solution(self, u=None, component='abs', cmap='viridis'):
         """
         Display the stationary solution computed by solve_stationary_psiOp.
 
@@ -4162,10 +4126,9 @@ class PDESolver:
             ax.set_xlabel('x')
             ax.set_ylabel('y')
             ax.set_zlabel(f'{component.title()} of u')
-            ax.set_title('Initial condition')
-    
+            plt.title('Stationary solution (2D)')    
             data0 = get_component(u)
-            surf = [ax.plot_surface(self.X, self.Y, data0, cmap='viridis')]
+            ax.plot_surface(self.X, self.Y, data0, cmap='viridis')
             plt.tight_layout()
             plt.show()
     
@@ -4398,7 +4361,6 @@ class PDESolver:
         # Plot
         if plot:
             if self.dim == 1:
-                import matplotlib.pyplot as plt
                 plt.figure(figsize=(12, 6))
                 plt.subplot(2, 1, 1)
                 plt.plot(self.X, np.real(u_num), label='Numerical')
@@ -4414,7 +4376,6 @@ class PDESolver:
                 plt.tight_layout()
                 plt.show()
             else:
-                import matplotlib.pyplot as plt
                 plt.figure(figsize=(15, 5))
                 plt.subplot(1, 3, 1)
                 plt.title("Numerical Solution")
