@@ -3522,59 +3522,6 @@ class PDESolver:
     
         return u_new, v_new
 
-    def compute_combined_symbol(self):
-        """
-        Evaluate the weighted sum of pseudo-differential symbols on the spatial-frequency grid.
-    
-        This method computes the total symbol of a pseudo-differential operator defined as a linear combination of individual operators (self.psi_ops). Each symbol is evaluated over the spatial-frequency grid and multiplied by its respective complex coefficient. The final result is the sum of all scaled symbol arrays.
-    
-        Returns
-        -------
-        np.ndarray
-            A complex-valued array representing the combined symbol values over the grid.
-            The shape matches the frequency grid: (Nx,) in 1D or (Nx, Ny) in 2D.
-    
-        Raises
-        ------
-        AttributeError
-            If self.psi_ops has not been defined before calling this method.
-    
-        Notes
-        -----
-        - Symbolic coefficients are converted to complex numbers using sympy.N().
-        - Symbols are evaluated using the current spatial grid (self.X, self.Y) and frequency grid (self.KX, self.KY).
-        - Supports both 1D and 2D configurations.
-        - Used primarily during time-stepping to precompute operator values when applying exponential integrators or spectral methods.
-    
-        See Also
-        --------
-        PseudoDifferentialOperator.evaluate : Evaluates a single symbol on the grid.
-        prepare_symbol_tables : Precomputes and stores symbols for efficiency.
-        psiOp_apply : Applies the symbol in the time-stepping loop.
-        """
-        if not hasattr(self, 'psi_ops'):
-            raise AttributeError("psi_ops not defined")
-    
-        shape = self.KX.shape if self.dim == 2 else self.KX.shape
-        symbol_vals = np.zeros(shape, dtype=np.complex128)
-    
-        for coeff_sym, psi in self.psi_ops:
-            coeff = complex(N(coeff_sym))
-            raw = psi.evaluate(
-                self.X,
-                self.Y if self.dim == 2 else None,
-                self.KX,
-                self.KY if self.dim == 2 else None
-            )
-    
-            flat = list(raw.flat)
-            values = [complex(N(v)) for v in flat]
-            sym_np = np.array(values, dtype=np.complex128).reshape(raw.shape)
-    
-            symbol_vals += coeff * sym_np
-    
-        return symbol_vals
-
     def check_cfl_condition(self):
         """
         Check the CFL (Courant–Friedrichs–Lewymann) condition based on group velocity 
