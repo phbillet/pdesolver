@@ -3720,6 +3720,7 @@ class PDESolver:
     
         else:
             raise ValueError("Only 1D and 2D dimensions are supported.")
+
     
         re_vals = np.real(L_vals)
         abs_vals = np.abs(L_vals)
