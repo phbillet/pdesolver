@@ -2169,12 +2169,15 @@ class PDESolver:
         print(f"Temporal order from dispersion relation: {self.temporal_order}")
         print('self.pseudo_terms = ', self.pseudo_terms)
         if self.pseudo_terms:
-            # on détecte l’ordre temporel comme avant
-            # puis on instancie pour chaque terme :
+            coeff_time = 1
+            for term, coeff in self.linear_terms.items():
+                if isinstance(term, Derivative) and any(var == self.t for var, _ in term.variable_count):
+                    coeff_time = coeff
+                    print(f"✅ Time derivative coefficient detected: {coeff_time}")
             self.psi_ops = []
             for coeff, sym_expr in self.pseudo_terms:
                 # expr est le Sympy expr. différentiel, var_x la liste [x] ou [x,y]
-                psi = PseudoDifferentialOperator(sym_expr, self.spatial_vars, self.u, mode='symbol')
+                psi = PseudoDifferentialOperator(sym_expr / coeff_time, self.spatial_vars, self.u, mode='symbol')
                 
                 self.psi_ops.append((coeff, psi))
         else:
@@ -2309,16 +2312,19 @@ class PDESolver:
         # Initialization of solution and velocities
         if not self.is_stationary:
             self._initialize_conditions(initial_condition, initial_velocity)
-    
+            
         # Symbol analysis if present
         if self.has_psi:
             print("⚠️ For psiOp, use interactive_symbol_analysis.")
         else:
-            self.check_cfl_condition()
-            self.check_symbol_conditions()
-            self.plot_symbol()
-            if self.temporal_order == 2:
-                self.analyze_wave_propagation()    
+            if self.L_symbolic == 0:
+                print("⚠️ Linear operator is null.")
+            else:
+                self.check_cfl_condition()
+                self.check_symbol_conditions()
+                self.plot_symbol()
+                if self.temporal_order == 2:
+                    self.analyze_wave_propagation()
 
     def _setup_1D(self, Lx, Nx):
         """
