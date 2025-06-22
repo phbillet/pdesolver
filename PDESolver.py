@@ -74,6 +74,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 from scipy.fft import fft2, ifft2, fft, ifft, fftfreq, fftshift, ifftshift
 from scipy.signal.windows import hann
+from scipy.integrate import solve_ivp
+from scipy.ndimage import maximum_filter
 from sympy import (
     symbols, Function, 
     solve, pprint, Mul,
@@ -99,7 +101,6 @@ from matplotlib import rc
 from IPython.display import HTML
 from functools import partial
 from misc import * 
-from scipy.integrate import solve_ivp
 from IPython.display import display
 from ipywidgets import interact, FloatSlider, Dropdown
     
@@ -1530,6 +1531,7 @@ class PseudoDifferentialOperator:
             plt.close(fig)
             return ani
 
+    # pragma: no cover
     def interactive_symbol_analysis(pseudo_op,
                                     xlim=(-2, 2), ylim=(-2, 2),
                                     xi_range=(0.1, 5), eta_range=(-5, 5),
@@ -4111,7 +4113,7 @@ class PDESolver:
         overlay : str in {'contour', 'front'}, optional
             Type of overlay for 2D animations:
             - 'contour' : Adds contour lines beneath the surface at each frame.
-            - 'front' : (Not implemented here) Could be used for tracking wavefronts.
+            - 'front' : Used for tracking wavefronts.
 
         Returns
         -------
@@ -4146,7 +4148,7 @@ class PDESolver:
         frame_times = np.arange(0, self.Lt + self.dt, save_interval * self.dt)
         
         # === Target times for animation ===
-        target_times = np.linspace(0, self.Lt, self.n_frames)
+        target_times = np.linspace(0, self.Lt, self.n_frames // 2)
         
         # Map target times to nearest frame indices
         frame_indices = [np.argmin(np.abs(frame_times - t)) for t in target_times]
@@ -4198,6 +4200,18 @@ class PDESolver:
     
                 if overlay == 'contour':
                     ax.contour(self.X, self.Y, current_data, levels=10, cmap='cool', offset=z_offset)
+                elif overlay == 'front':
+                    dx = self.x_grid[1] - self.x_grid[0]
+                    dy = self.y_grid[1] - self.y_grid[0]
+                    du_dx, du_dy = np.gradient(current_data, dx, dy)
+                    grad_norm = np.sqrt(du_dx**2 + du_dy**2)
+                    local_max = (grad_norm == maximum_filter(grad_norm, size=5))
+                    normalized = grad_norm[local_max] / np.max(grad_norm)
+                    colors = cm.plasma(normalized)
+    
+                    ax.scatter(self.X[local_max], self.Y[local_max],
+                               z_offset * np.ones_like(self.X[local_max]),
+                               color=colors, s=10, alpha=0.8)
     
                 ax.set_xlabel('x')
                 ax.set_ylabel('y')
