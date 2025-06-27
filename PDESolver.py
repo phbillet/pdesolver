@@ -81,7 +81,8 @@ from sympy import (
     solve, pprint, Mul,
     lambdify, expand, Eq, simplify, trigsimp, N,
     radsimp, ratsimp, cancel,
-    Lambda, Piecewise, Basic, degree, Pow, preorder_traversal,
+    Lambda, Piecewise, Basic, degree, Pow, preorder_traversal, 
+    powdenest, expand, 
     sqrt, I,  pi, series, oo, 
     re, im, arg, Abs, conjugate, 
     sin, cos, tan, cot, sec, csc, sinc,
@@ -218,7 +219,7 @@ class PseudoDifferentialOperator:
             raise NotImplementedError("Only 1D and 2D supported")
 
         print("\nsymbol = ")
-        pprint(expr)
+        pprint(expr, num_columns=150)
         
     def evaluate(self, X, Y, KX, KY, cache=True):
         """
@@ -293,179 +294,322 @@ class PseudoDifferentialOperator:
         """
 
         p = self.expr
-        print("principal_symbol")
         if self.dim == 1:
-            print("principal_symbol 1D")
-            xi = symbols('xi', real=True)
+            xi = symbols('xi', real=True, positive=True)
             return simplify(series(p, xi, oo, n=order).removeO())
         elif self.dim == 2:
-            print("principal_symbol 2D")
-            xi, eta = symbols('xi eta', real=True)
+            xi, eta = symbols('xi eta', real=True, positive=True)
             # Homogeneous radial expansion: we set (ξ, η) = ρ (cosθ, sinθ)
-            rho, theta = symbols('rho theta', real=True)
+            rho, theta = symbols('rho theta', real=True, positive=True)
             p_rho = p.subs({xi: rho * cos(theta), eta: rho * sin(theta)})
             expansion = series(p_rho, rho, oo, n=order).removeO()
             # Revert back to (ξ, η)
             expansion_cart = expansion.subs({rho: sqrt(xi**2 + eta**2),
                                              cos(theta): xi / sqrt(xi**2 + eta**2),
                                              sin(theta): eta / sqrt(xi**2 + eta**2)})
-            return simplify(expansion_cart)
-           
-    def symbol_order(self, max_order=10, tol=1e-3):
+            return simplify(powdenest(expansion_cart, force=True))
+                       
+    def is_homogeneous(self, tol=1e-10):
         """
-        Estimate the order (degree of homogeneity) of the pseudo-differential symbol in high-frequency asymptotics.
-
-        This method determines the leading-order term's degree of homogeneity by:
-        - Expanding the symbol p(x, ξ) in an asymptotic series as |ξ| → ∞
-        - Testing successive degrees up to `max_order`
-        - Using a numerical tolerance `tol` to filter negligible coefficients
-
-        Supports both 1D and 2D symbols:
-        - In 1D: expands directly in ξ
-        - In 2D: introduces polar coordinates (ρ, θ) and expands in ρ = |ξ|
-
-        Parameters
-        ----------
-        max_order : int, default=10
-            Maximum polynomial degree to test for non-zero leading term.
-        tol : float, default=1e-3
-            Threshold below which coefficients are considered zero.
-
+        Check whether the symbol is homogeneous in the frequency variables.
+    
         Returns
         -------
-        int or None
-            Estimated homogeneity degree of the symbol, or None if expansion fails 
-            or no significant term is found within tolerance.
+        (bool, Rational or float or None)
+            Tuple (is_homogeneous, degree) where:
+            - is_homogeneous: True if the symbol satisfies p(λξ, λη) = λ^m * p(ξ, η)
+            - degree: the detected degree m if homogeneous, or None
+        """
+        from sympy import symbols, simplify, expand, Eq
+        from sympy.abc import l
+    
+        if self.dim == 1:
+            xi = symbols('xi', real=True, positive=True)
+            l = symbols('l', real=True, positive=True)
+            p = self.expr
+            p_scaled = p.subs(xi, l * xi)
+            ratio = simplify(p_scaled / p)
+            if ratio.has(xi):
+                return False, None
+            try:
+                deg = simplify(ratio).as_base_exp()[1]
+                return True, deg
+            except Exception:
+                return False, None
+    
+        elif self.dim == 2:
+            xi, eta = symbols('xi eta', real=True, positive=True)
+            l = symbols('l', real=True, positive=True)
+            p = self.expr
+            p_scaled = p.subs({xi: l * xi, eta: l * eta})
+            ratio = simplify(p_scaled / p)
+            # If ratio == l**m with no (xi, eta) left, it's homogeneous
+            if ratio.has(xi, eta):
+                return False, None
+            try:
+                base, exp = ratio.as_base_exp()
+                if base == l:
+                    return True, exp
+            except Exception:
+                pass
+            return False, None
 
+    def symbol_order(self, max_order=10, tol=1e-3):
+        """
+        Estimate the homogeneity order of the pseudo-differential symbol in high-frequency asymptotics.
+    
+        This method attempts to determine the leading-order behavior of the symbol p(x, ξ) or p(x, y, ξ, η)
+        as |ξ| → ∞ (in 1D) or |(ξ, η)| → ∞ (in 2D). The returned value represents the asymptotic growth or decay rate,
+        which is essential for understanding the regularity and mapping properties of the corresponding operator.
+    
+        The function uses symbolic preprocessing to ensure proper factorization of frequency variables,
+        especially in sqrt and power expressions, to avoid erroneous order detection (e.g., due to hidden scaling).
+    
+        Parameters
+        ----------
+        max_order : int, optional
+            Maximum number of terms to consider in the series expansion. Default is 10.
+        tol : float, optional
+            Tolerance threshold for evaluating the coefficient magnitude. If the coefficient is too small,
+            the detected order may be discarded. Default is 1e-3.
+    
+        Returns
+        -------
+        float or None
+            - If the symbol is homogeneous, returns its exact homogeneity degree as a float.
+            - Otherwise, estimates the dominant asymptotic order from leading terms in the expansion.
+            - Returns None if no valid order could be determined.
+    
         Notes
         -----
-        - Homogeneity is crucial for ellipticity and microlocal analysis.
-        - The method ignores terms still depending on spatial variables x/y.
-        - Robust to symbolic simplification errors via try/except blocks.
+        - In 1D:
+            Two strategies are used:
+                1. Expand directly in xi at infinity.
+                2. Substitute xi = 1/z and expand around z = 0.
+    
+        - In 2D:
+            - Transform the symbol into polar coordinates: (xi, eta) = rho*(cos(theta), sin(theta)).
+            - Expand in rho at infinity, then extract the leading term's power.
+            - An alternative substitution using 1/z is also tried if the first method fails.
+    
+        - Preprocessing steps:
+            - Sqrt expressions involving frequencies are rewritten to isolate the leading variable.
+            - Power expressions are factored explicitly to ensure correct symbolic scaling.
+    
+        - If the symbol is not homogeneous, a warning is issued, and the result should be interpreted with care.
+        
+        - For non-homogeneous symbols, only the principal asymptotic term is considered.
+    
+        Raises
+        ------
+        NotImplementedError
+            If the spatial dimension is neither 1 nor 2.
         """
-        p = self.expr
-        
-        if self.dim == 1:
-            xi = symbols('xi', real=True)
-            try:
-                s = simplify(series(p, xi, oo, n=max_order).removeO())
-                terms = s.as_ordered_terms()
-                for term in reversed(terms):
-                    poly = term.as_poly(xi)
-                    if poly is None:
-                        continue
-                    degree = poly.degree()
-                    coeff = poly.coeff_monomial(xi**degree)
-                    if coeff.free_symbols:
-                        continue  # still depends on x, we ignore
-                    if abs(float(coeff.evalf())) > tol:
-                        return degree
-            except Exception as e:
-                print(f"Order estimation failed: {e}")
-            return None
-        
-        elif self.dim == 2:
-            xi, eta = symbols('xi eta', real=True)
-            rho, theta = symbols('rho theta', real=True)
-            try:
-                p_rho = p.subs({xi: rho * cos(theta), eta: rho * sin(theta)})
-                s = simplify(series(p_rho, rho, oo, n=max_order).removeO())
-                terms = s.as_ordered_terms()
-                for term in reversed(terms):
-                    poly = term.as_poly(rho)
-                    if poly is None:
-                        continue
-                    degree = poly.degree()
-                    coeff = poly.coeff_monomial(rho**degree)
-                    if coeff.free_symbols:
-                        continue
-                    if abs(float(coeff.evalf())) > tol:
-                        return degree
-            except Exception as e:
-                print(f"2D Order estimation failed: {e}")
-            return None
+        from sympy import symbols, series, simplify, sqrt, cos, sin, oo, powdenest, radsimp, expand, expand_power_base
+    
+        def preprocess_sqrt(expr, freq):
+            return expr.replace(
+                lambda e: e.func == sqrt and freq in e.free_symbols,
+                lambda e: freq * sqrt(1 + (e.args[0] - freq**2) / freq**2)
+            )
+    
+        def preprocess_power(expr, freq):
+            """Force factorization of the leading frequency variable in power expressions."""
+            return expr.replace(
+                lambda e: e.is_Pow and freq in e.free_symbols,
+                lambda e: freq**e.exp * (1 + e.base/freq**e.base.as_powers_dict().get(freq, 0))**e.exp
+            )
 
+        # Check if the symbol is homogeneous
+        is_homog, degree = self.is_homogeneous()
+        if is_homog:
+            return float(degree)
+        else:
+            print("⚠️ The symbol is not homogeneous. The asymptotic order is not well defined.")
+    
+        if self.dim == 1:
+            x = self.vars_x[0]
+            xi = symbols('xi', real=True, positive=True)
+            try:
+                print("1D symbol_order - method 1")
+                expr = preprocess_sqrt(self.expr, xi)
+                s = series(expr, xi, oo, n=max_order).removeO()
+                lead = s.as_leading_term(xi)
+                lead = simplify(powdenest(lead, force=True))
+                power = lead.as_powers_dict().get(xi, None)
+                coeff = lead / xi**power if power is not None else 0
+                print("lead =", lead)
+                print("power =", power)
+                print("coeff =", coeff)
+    
+                if power is not None and (not coeff.free_symbols or x not in coeff.free_symbols):
+                    if abs(float(coeff.evalf())) > tol:
+                        return int(power) if power == int(power) else float(power)
+            except Exception:
+                pass
+    
+            try:
+                print("1D symbol_order - method 2")
+                z = symbols('z', real=True, positive=True)
+                expr_z = self.expr.subs(xi, 1/z)
+                expr_z = preprocess_sqrt(expr_z, 1/z)
+                s = series(expr_z, z, 0, n=max_order).removeO()
+                lead = s.as_leading_term(z)
+                lead = simplify(powdenest(lead, force=True))
+                power = lead.as_powers_dict().get(z, None)
+                print("lead =", lead)
+                print("power =", power)
+    
+                if power is not None:
+                    return -float(power)
+            except Exception as e:
+                print(f"⚠️ fallback z failed: {e}")
+            return None
+    
+        elif self.dim == 2:
+            x, y = self.vars_x
+            xi, eta = symbols('xi eta', real=True, positive=True)
+            rho, theta = symbols('rho theta', real=True, positive=True)
+    
+            try:
+                print("2D symbol_order - method 1")
+                p_rho = self.expr.subs({xi: rho * cos(theta), eta: rho * sin(theta)})
+                p_rho = preprocess_sqrt(p_rho, rho)
+                p_rho = preprocess_power(p_rho, rho)  # ⚠️ Nouvelle étape ici
+                p_rho = simplify(p_rho)
+                s = series(p_rho, rho, oo, n=max_order).removeO()
+                s = expand(s)
+                lead = s.as_leading_term(rho)
+                lead = simplify(powdenest(lead, force=True))
+                lead = radsimp(lead)
+                power = lead.as_powers_dict().get(rho, None)
+                coeff = lead / rho**power if power is not None else 0
+                print("lead =", lead)
+                print("power =", power)
+                print("coeff =", coeff)
+    
+                if power is not None and not any(v in coeff.free_symbols for v in (x, y)):
+                    if abs(float(coeff.evalf())) > tol or power > -1:
+                        return int(power) if power == int(power) else float(power)
+            except Exception as e:
+                print(f"⚠️ polar expansion failed: {e}")
+                pass
+    
+            try:
+                print("2D symbol_order - method 2")
+                z = symbols('z', real=True, positive=True)
+                p_rho = self.expr.subs({xi: (1/z) * cos(theta), eta: (1/z) * sin(theta)})
+                p_rho = preprocess_sqrt(p_rho, 1/z)
+                p_rho = simplify(p_rho)
+                s = series(p_rho, z, 0, n=max_order).removeO()
+                lead = s.as_leading_term(z)
+                lead = simplify(powdenest(lead, force=True))
+                lead = radsimp(lead)
+                power = lead.as_powers_dict().get(z, None)
+                print("lead =", lead)
+                print("power =", power)
+    
+                if power is not None:
+                    order = -power
+                    return int(order) if order == int(order) else float(order)
+            except Exception as e:
+                print(f"⚠️ fallback z (2D) failed: {e}")
+            return None
+    
+        else:
+            raise NotImplementedError("Only 1D and 2D supported.")
+        
     def asymptotic_expansion(self, order=3):
         """
         Compute the asymptotic expansion of the symbol as |ξ| → ∞ (high-frequency regime).
-
+    
         This method expands the pseudo-differential symbol in inverse powers of the 
         frequency variable(s), either in 1D or 2D. It handles both polynomial and 
         exponential symbols by performing a series expansion in 1/|ξ| up to the specified order.
-
+    
+        The expansion is performed directly in Cartesian coordinates for 1D symbols.
+        For 2D symbols, the method uses polar coordinates (ρ, θ) to perform the expansion 
+        at infinity in ρ, then converts the result back to Cartesian coordinates.
+    
         Parameters
         ----------
         order : int, optional
             Maximum order of the asymptotic expansion. Default is 3.
-
+    
         Returns
         -------
         sympy.Expr
             The asymptotic expansion of the symbol up to the given order, expressed in Cartesian coordinates.
             If expansion fails, returns the original unexpanded symbol.
-
+    
         Notes:
         - In 1D: expansion is performed directly in terms of ξ.
         - In 2D: the symbol is first rewritten in polar coordinates (ρ,θ), expanded asymptotically 
           in ρ → ∞, then converted back to Cartesian coordinates (ξ,η).
         - Handles special case when the symbol is an exponential function by expanding its argument.
+        - Symbolic normalization is applied early (via `simplify`) for 2D expressions to improve convergence.
         - Robust to failures: catches exceptions and issues warnings instead of raising errors.
-
-        Examples:
-        >>> op = PseudoDifferentialOperator(expr=exp(-xi**-2), vars_x=[x])
-        >>> op.asymptotic_expansion(4)
-        1 - 1/ξ² + 1/(2ξ⁴) + ...
+        - Final expression is simplified using `powdenest` and `expand` for improved readability.
         """
         p = self.expr
-        
+    
         if self.dim == 1:
-            xi = symbols('xi', real=True)
-        
+            xi = symbols('xi', real=True, positive=True)
+    
             try:
-                # Case exp(f(x, xi))
+                # Case: exponential function
                 if p.func == exp and len(p.args) == 1:
                     arg = p.args[0]
                     arg_series = series(arg, xi, oo, n=order).removeO()
-                    # Expand exp(arg_series)
-                    expanded = series(expand(exp(arg_series)), xi, oo, n=order).removeO()
-                    return simplify(expanded)
+                    expanded = series(exp(expand(arg_series)), xi, oo, n=order).removeO()
+                    return simplify(powdenest(expanded, force=True))
                 else:
-                    return simplify(series(p, xi, oo, n=order).removeO())
-        
+                    expanded = series(p, xi, oo, n=order).removeO()
+                    return simplify(powdenest(expanded, force=True))
+    
             except Exception as e:
-                print(f"Warning: expansion failed: {e}")
+                print(f"Warning: 1D expansion failed: {e}")
                 return p
-        
+    
         elif self.dim == 2:
-            xi, eta = symbols('xi eta', real=True)
-            rho, theta = symbols('rho theta', real=True)
-        
-            # Switch to polar coordinates
-            p_rho = p.subs({xi: rho * cos(theta), eta: rho * sin(theta)})
-        
+            xi, eta = symbols('xi eta', real=True, positive=True)
+            rho, theta = symbols('rho theta', real=True, positive=True)
+    
+            # Normalize before substitution
+            p = simplify(p)
+    
+            # Substitute polar coordinates
+            p_polar = p.subs({
+                xi: rho * cos(theta),
+                eta: rho * sin(theta)
+            })
+    
             try:
-                if p_rho.func == exp and len(p_rho.args) == 1:
-                    arg = p_rho.args[0]
+                # Handle exponentials
+                if p_polar.func == exp and len(p_polar.args) == 1:
+                    arg = p_polar.args[0]
                     arg_series = series(arg, rho, oo, n=order).removeO()
                     expanded = series(exp(expand(arg_series)), rho, oo, n=order).removeO()
                 else:
-                    expanded = series(p_rho, rho, oo, n=order).removeO()
-        
-                # Revert to (xi, eta)
+                    expanded = series(p_polar, rho, oo, n=order).removeO()
+    
+                # Convert back to Cartesian
                 norm = sqrt(xi**2 + eta**2)
                 expansion_cart = expanded.subs({
                     rho: norm,
                     cos(theta): xi / norm,
                     sin(theta): eta / norm
                 })
-        
-                return simplify(expansion_cart)
-        
+    
+                # Final simplifications
+                result = simplify(powdenest(expansion_cart, force=True))
+                result = expand(result)
+                return result
+    
             except Exception as e:
                 print(f"Warning: 2D expansion failed: {e}")
-                return p
-
-
+                return p  
+            
     def compose_asymptotic(self, other, order=1):
         """
         Compose this pseudo-differential operator with another using formal asymptotic expansion.
@@ -807,47 +951,55 @@ class PseudoDifferentialOperator:
 
     def visualize_wavefront(self, x_grid, xi_grid, y_grid=None, eta_grid=None, xi0=0.0, eta0=0.0):
         """
-        Visualize the wavefront set by plotting the magnitude of the symbol |p(x, ξ)| in 1D 
-        or a slice |p(x, y, ξ₀, η₀)| in 2D. This provides insight into the microlocal singularities 
-        of the operator's symbol.
+        Visualize the wavefront set of the pseudo-differential operator's symbol by plotting |p(x, ξ)| or |p(x, y, ξ₀, η₀)|.
     
-        The wavefront set characterizes the location and direction of singularities in a distribution. 
-        Here, it is approximated numerically by evaluating the symbol on a spatial-frequency grid.
+        The wavefront set captures the location and direction of singularities in the symbol p, which is crucial in 
+        microlocal analysis for understanding propagation of singularities and wave behavior.
+    
+        In 1D, this method displays |p(x, ξ)| over the phase space (x, ξ). In 2D, it fixes the frequency values (ξ₀, η₀)
+        and visualizes |p(x, y, ξ₀, η₀)| over the spatial domain to highlight where the symbol interacts with the fixed frequency.
     
         Parameters
         ----------
-        x_grid, y_grid : ndarray
-            Spatial grid arrays (y_grid is optional for 1D problems).
-        xi_grid, eta_grid : ndarray
-            Frequency grid arrays (eta_grid is optional for 1D problems).
-        xi0, eta0 : float
-            Fixed frequency values used to slice the symbol in 2D visualization.
+        x_grid : ndarray
+            1D array of spatial coordinates (x) used for evaluation.
+        xi_grid : ndarray
+            1D array of frequency coordinates (ξ) used for visualization in 1D or slicing in 2D.
+        y_grid : ndarray, optional
+            1D array of second spatial coordinate (y), used only in 2D.
+        eta_grid : ndarray, optional
+            1D array of second frequency coordinate (η), not directly used but kept for API consistency.
+        xi0 : float, default=0.0
+            Fixed value of ξ for slicing in 2D visualization.
+        eta0 : float, default=0.0
+            Fixed value of η for slicing in 2D visualization.
     
         Notes
         -----
-        - In 1D: Displays |p(x, ξ)| as a 2D color map with axes (x, ξ).
-        - In 2D: Displays |p(x, y, ξ₀, η₀)| as a 2D color map over the spatial domain.
-        - Uses imshow for efficient visualization with automatic aspect scaling.
+        - In 1D:
+            Displays a 2D color map of |p(x, ξ)| over the phase space with axes (x, ξ).
+        - In 2D:
+            Evaluates and plots |p(x, y, ξ₀, η₀)| at fixed frequencies (ξ₀, η₀) over the spatial grid (x, y).
+        - Uses `imshow` for fast and scalable visualization with automatic aspect ratio adjustment.
+        - A colormap ('viridis') is used to enhance contrast and readability of the magnitude variations.
         """
         if self.dim == 1:
-            symbol_vals = self.p_func(x_grid[:, None], xi_grid[None, :])
-            plt.imshow(np.abs(symbol_vals), extent=[xi_grid.min(), xi_grid.max(), x_grid.min(), x_grid.max()], aspect='auto', origin='lower')
-            plt.colorbar(label='|Symbol|')
-            plt.xlabel('ξ (frequency)')
-            plt.ylabel('x (position)')
-            plt.title('Wavefront Set (|Symbol(x, ξ)|)')
-            plt.show()
+            X, XI = np.meshgrid(x_grid, xi_grid)
+            symbol_vals = self.p_func(X, XI)
+            plt.imshow(np.abs(symbol_vals), extent=[xi_grid.min(), xi_grid.max(), x_grid.min(), x_grid.max()],
+                       aspect='auto', origin='lower', cmap='viridis')
         elif self.dim == 2:
-            X, Y = np.meshgrid(x_grid, y_grid, indexing='ij')
+            X, Y = np.meshgrid(x_grid, y_grid)
             XI = np.full_like(X, xi0)
             ETA = np.full_like(Y, eta0)
             symbol_vals = self.p_func(X, Y, XI, ETA)
-            plt.imshow(np.abs(symbol_vals), extent=[x_grid.min(), x_grid.max(), y_grid.min(), y_grid.max()],aspect='auto', origin='lower')
-            plt.colorbar(label='|Symbol|')
-            plt.xlabel('x')
-            plt.ylabel('y')
-            plt.title(f'Wavefront Set at ξ={xi0}, η={eta0}')
-            plt.show()
+            plt.imshow(np.abs(symbol_vals), extent=[x_grid.min(), x_grid.max(), y_grid.min(), y_grid.max()],
+                       aspect='auto', origin='lower', cmap='viridis')
+        plt.colorbar(label='|Symbol|')
+        plt.xlabel('ξ/Position')
+        plt.ylabel('η/Position')
+        plt.title('Wavefront Set')
+        plt.show()
 
     def visualize_fiber(self, x_grid, xi_grid, y0=0.0, x0=0.0):
         """
@@ -995,7 +1147,7 @@ class PseudoDifferentialOperator:
             plt.title(f'Phase Portrait at ξ={xi0}, η={eta0}')
             plt.show()
 
-    def visualize_characteristic_set(self, x_grid, xi_grid, y0=0.0, x0=0.0):
+    def visualize_characteristic_set(self, x_grid, xi_grid, y_grid=None, eta_grid=None, y0=0.0, x0=0.0):
         """
         Visualize the characteristic set of the pseudo-differential symbol, defined as the approximate zero set p(x, ξ) ≈ 0.
     
@@ -1031,20 +1183,54 @@ class PseudoDifferentialOperator:
             - The characteristic surface slice in the (ξ, η) frequency plane at (x₀, y₀) (2D).
         """
         if self.dim == 1:
+            x_grid = np.asarray(x_grid)
+            xi_grid = np.asarray(xi_grid)
             X, XI = np.meshgrid(x_grid, xi_grid, indexing='ij')
             symbol_vals = self.p_func(X, XI) 
-            plt.contour(X, XI, np.abs(symbol_vals), levels=[1e-5], colors='red')
+            plt.contour(X, XI, np.abs(symbol_vals), levels=[1e-1], colors='red')
             plt.xlabel('x')
             plt.ylabel('ξ')
             plt.title('Characteristic Set (p(x, ξ) ≈ 0)')
+            plt.grid(True)
             plt.show()
         elif self.dim == 2:
-            xi_grid2, eta_grid2 = np.meshgrid(xi_grid, xi_grid)
+            if eta_grid is None:
+                raise ValueError("eta_grid must be provided for 2D visualization.")
+            xi_grid = np.asarray(xi_grid)
+            eta_grid = np.asarray(eta_grid)
+            xi_grid2, eta_grid2 = np.meshgrid(xi_grid, eta_grid, indexing='ij')
             symbol_vals = self.p_func(x0, y0, xi_grid2, eta_grid2)
-            plt.contour(xi_grid, xi_grid, np.abs(symbol_vals), levels=[1e-5], colors='red')
+            plt.contour(xi_grid, eta_grid, np.abs(symbol_vals), levels=[1e-1], colors='red')
             plt.xlabel('ξ')
             plt.ylabel('η')
             plt.title(f'Characteristic Set at x={x0}, y={y0}')
+            plt.grid(True)
+            plt.show()
+        else:
+            raise NotImplementedError("Only 1D/2D characteristic sets supported.")
+
+    def visualize_characteristic_gradient(self, x_grid, xi_grid, y_grid=None, eta_grid=None, y0=0.0, x0=0.0):
+        if self.dim == 1:
+            X, XI = np.meshgrid(x_grid, xi_grid, indexing='ij')
+            symbol_vals = self.p_func(X, XI)
+            grad_x = np.gradient(symbol_vals, axis=0)
+            grad_xi = np.gradient(symbol_vals, axis=1)
+            grad_norm = np.sqrt(grad_x**2 + grad_xi**2)
+            plt.pcolormesh(X, XI, grad_norm, cmap='inferno', shading='auto')
+            plt.colorbar(label='|∇p|')
+            plt.title('Gradient Norm (High Near Zeros)')
+            plt.grid(True)
+            plt.show()
+        elif self.dim == 2:
+            xi_grid2, eta_grid2 = np.meshgrid(xi_grid, eta_grid, indexing='ij')
+            symbol_vals = self.p_func(x0, y0, xi_grid2, eta_grid2)
+            grad_xi = np.gradient(symbol_vals, axis=0)
+            grad_eta = np.gradient(symbol_vals, axis=1)
+            grad_norm = np.sqrt(grad_xi**2 + grad_eta**2)
+            plt.pcolormesh(xi_grid, eta_grid, grad_norm, cmap='inferno', shading='auto')
+            plt.colorbar(label='|∇p|')
+            plt.title(f'Gradient Norm at x={x0}, y={y0}')
+            plt.grid(True)
             plt.show()
 
     def visualize_dynamic_wavefront(self, x_grid, t_grid, y_grid=None, xi0=5.0, eta0=0.0):
@@ -1699,13 +1885,12 @@ class PseudoDifferentialOperator:
                                               x0=x0, y0=y0)
     
                 elif mode == 'Characteristic Set':
-                    pseudo_op.visualize_characteristic_set(np.linspace(*xi_range, density),
-                                                           np.linspace(*eta_range, density),
-                                                           x0=x0, y0=y0)
+                    pseudo_op.visualize_characteristic_set(x_grid=x_vals, xi_grid=np.linspace(*xi_range, density),
+                                                  y_grid=y_vals, eta_grid=np.linspace(*eta_range, density), x0=x0, y0=y0)
     
                 elif mode == 'Wavefront Set':
-                    pseudo_op.visualize_wavefront(x_vals, np.linspace(*xi_range, density),
-                                                  y_grid=y_vals, xi0=xi0, eta0=eta0)
+                    pseudo_op.visualize_wavefront(x_grid=x_vals, xi_grid=np.linspace(*xi_range, density),
+                                                  y_grid=y_vals, eta_grid=np.linspace(*eta_range, density), xi0=xi0, eta0=eta0)
     
                 elif mode == 'Hamiltonian Flow':
                     pseudo_op.plot_hamiltonian_flow(x0=x0, y0=y0, xi0=xi0, eta0=eta0)
@@ -3183,7 +3368,7 @@ class PDESolver:
     
         R_symbol = psi_total.right_inverse_asymptotic(order=order)
         print("Right inverse asymptotic symbol:")
-        pprint(R_symbol)
+        pprint(R_symbol, num_columns=150)
 
         if self.dim == 1:
             if R_symbol.has(x):
