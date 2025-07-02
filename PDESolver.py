@@ -3092,10 +3092,10 @@ class PDESolver:
                 return self.kohn_nirenberg_fft(u_vals=u, symbol_func=symbol_func)
             elif self.boundary_condition == 'dirichlet':
                 if self.dim == 1:
-                    return self.kohn_nirenberg_nonperiodic(u_vals=u, x_grid=self.x_grid, xi_grid=self.xi_grid, symbol_func=symbol_func)
+                    return self.kohn_nirenberg_nonperiodic(u_vals=u, x_grid=self.x_grid, xi_grid=self.KX, symbol_func=symbol_func)
                 elif self.dim == 2:
                     return self.kohn_nirenberg_nonperiodic(u_vals=u, x_grid=(self.x_grid, self.y_grid),
-                                                           xi_grid=(self.xi_grid, self.eta_grid), symbol_func=symbol_func)    
+                                                           xi_grid=(self.KX, self.KY), symbol_func=symbol_func)    
             else:
                 raise ValueError(
                     f"Invalid boundary condition '{self.boundary_condition}'. "
@@ -3491,15 +3491,16 @@ class PDESolver:
             self.u = u
             return u
         elif self.boundary_condition == 'dirichlet':
-                if self.dim == 1:
-                    x, xi = symbols('x xi', real=True)
-                    R_func = lambdify((x, xi), R_symbol, 'numpy')  # Still 2 args for uniformity
-                    return self.kohn_nirenberg_nonperiodic(u_vals=rhs, x_grid=X, xi_grid=KX, symbol_func=R_func)
-                elif self.dim == 2:
-                    x, xi, y, eta = symbols('x xi y eta', real=True)
-                    R_func = lambdify((x, y, xi, eta), R_symbol, 'numpy')  # Still 2 args for uniformity
-                    return self.kohn_nirenberg_nonperiodic(u_vals=rhs, x_grid=(X, Y),
-                                                           xi_grid=(KX, KY), symbol_func=R_func)    
+            if self.dim == 1:
+                x, xi = symbols('x xi', real=True)
+                R_func = lambdify((x, xi), R_symbol, 'numpy')
+                u = self.kohn_nirenberg_nonperiodic(u_vals=rhs, x_grid=X, xi_grid=KX, symbol_func=R_func)
+            elif self.dim == 2:
+                x, xi, y, eta = symbols('x xi y eta', real=True)
+                R_func = lambdify((x, y, xi, eta), R_symbol, 'numpy')
+                u = self.kohn_nirenberg_nonperiodic(u_vals=rhs, x_grid=(X, Y), xi_grid=(KX, KY), symbol_func=R_func)
+            self.u = u
+            return u   
         else:
             raise ValueError(
                 f"Invalid boundary condition '{self.boundary_condition}'. "
@@ -3812,14 +3813,14 @@ class PDESolver:
             # Oscillatory phase
             phase = np.exp(1j * (X1[:, :, None, None] * XI1[None, None, :, :] +
                                  X2[:, :, None, None] * XI2[None, None, :, :]))
-    
+
             integrand = sigma_vals * u_hat[None, None, :, :] * phase
             result = dxi1 * dxi2 * np.sum(integrand, axis=(2, 3)) / (2 * np.pi)**2
             return result
     
         else:
             raise NotImplementedError("Only 1D and 2D supported")
-           
+
     def step_ETD_RK4(self, u):
         """
         Perform one Exponential Time Differencing Runge-Kutta of 4th order (ETD-RK4) time step 
