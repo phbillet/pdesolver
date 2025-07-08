@@ -474,7 +474,7 @@ class PseudoDifferentialOperator:
                 print("2D symbol_order - method 1")
                 p_rho = self.expr.subs({xi: rho * cos(theta), eta: rho * sin(theta)})
                 p_rho = preprocess_sqrt(p_rho, rho)
-                p_rho = preprocess_power(p_rho, rho)  # ⚠️ Nouvelle étape ici
+                p_rho = preprocess_power(p_rho, rho)  
                 p_rho = simplify(p_rho)
                 s = series(p_rho, rho, oo, n=max_order).removeO()
                 s = expand(s)
@@ -2000,10 +2000,10 @@ class PDESolver:
         # Extract symbols and function from the equation
         functions = equation.atoms(Function)
         
-        # On ignore les wrappers psiOp et Op
+        # Ignore the wrappers psiOp and Op
         excluded_wrappers = {'psiOp', 'Op'}
         
-        # Extraction des fonctions candidates (hors wrappers)
+        # Extract the candidate fonctions (excluding wrappers)
         candidate_functions = [
             f for f in functions 
             if f.func.__name__ not in excluded_wrappers
@@ -2067,7 +2067,12 @@ class PDESolver:
         # flag : pseudo‑differential operator present ?
         self.has_psi = bool(self.pseudo_terms)
         if self.has_psi:
-            print("⚠️  Pseudo‑differential operator detected: all other linear terms have been rejected.")
+            print('⚠️  Pseudo‑differential operator detected: all other linear terms have been rejected.')
+            self.is_spatial = False
+            for coeff, expr in self.pseudo_terms:
+                if expr.has(self.x) or (self.dim == 2 and expr.has(self.y)):
+                    self.is_spatial = True
+                    break
     
         if self.dim == 1:
             self.kx = symbols('kx')
@@ -2974,290 +2979,392 @@ class PDESolver:
 
     def prepare_symbol_tables(self):
         """
-        Precompute and store numerical values of pseudo-differential symbols for efficient reuse.
-    
-        This method evaluates all pseudo-differential operator symbols (`psi_ops`) on the current spatial-frequency grid.
-        It numerically computes their values and stores them for fast access during time integration or inversion.
-        
-        The results are stored in two attributes:
-            - `self.precomputed_symbols`: List of (coefficient, symbol_array) pairs.
-            - `self.combined_symbol`: Sum of all scaled symbol arrays: Σ (coeff * p(x, ξ)).
-    
-        Notes
-        -----
-        - Symbols are evaluated over the full spatial-frequency grid defined by `self.X`, `self.Y`, `self.KX`, and `self.KY`.
-        - In 1D, only `self.X` and `self.KX` are used; `Y` and `KY` are ignored.
-        - Symbol expressions are converted to complex-valued NumPy arrays after symbolic evaluation.
-        - This method ensures that repeated evaluations (e.g., in exponential integrators) are fast and consistent.
-        - Used primarily in methods like `psiOp_apply` and `solve_stationary_psiOp`.
-    
-        Raises
-        ------
-        ValueError
-            If the spatial dimension is not supported (i.e., not 1D or 2D).
-    
-        See Also
-        --------
-        psiOp_apply : Applies precomputed symbols efficiently via spectral multiplication.
-        PseudoDifferentialOperator.evaluate : Evaluates a single symbol on a given grid.
-        solve_stationary_psiOp : Uses precomputed symbols to invert stationary equations.
+        Precompute and store evaluated pseudo-differential operator symbols for spectral methods.
+
+        This method evaluates all pseudo-differential operators (ψOp) present in the PDE
+        over the spatial and frequency grids, scales them by their respective coefficients,
+        and combines them into a single composite symbol used in time-stepping and inversion.
+
+        The evaluation is performed via the `evaluate` method of each PseudoDifferentialOperator,
+        which computes p(x, ξ) or p(x, y, ξ, η) numerically over the current grid configuration.
+
+        Side Effects:
+            self.precomputed_symbols : list of (coeff, symbol_array)
+                Each tuple contains a coefficient and its evaluated symbol on the grid.
+            self.combined_symbol : np.ndarray
+                Sum of all scaled symbol arrays: ∑(coeffₖ * ψₖ(x, ξ))
+
+        Raises:
+            ValueError: If the spatial dimension is not 1D or 2D.
         """
         self.precomputed_symbols = []
         self.combined_symbol = 0
-    
         for coeff, psi in self.psi_ops:
             if self.dim == 1:
                 raw = psi.evaluate(self.X, None, self.KX, None)
             elif self.dim == 2:
                 raw = psi.evaluate(self.X, self.Y, self.KX, self.KY)
             else:
-                raise ValueError("Unsupported spatial dimension.")
-    
-            # Flatten and evaluate numerically
+                raise ValueError('Unsupported spatial dimension.')
             raw_flat = raw.flatten()
             converted = np.array([complex(N(val)) for val in raw_flat], dtype=np.complex128)
             raw_eval = converted.reshape(raw.shape)
             self.precomputed_symbols.append((coeff, raw_eval))
-    
-        # Combine all symbols
-        self.combined_symbol = sum(coeff * sym for coeff, sym in self.precomputed_symbols)
-    
-        # Force final conversion to numpy array of complex numbers
+        self.combined_symbol = sum((coeff * sym for coeff, sym in self.precomputed_symbols))
         self.combined_symbol = np.array(self.combined_symbol, dtype=np.complex128)
+
+    def _total_symbol_expr(self):
+        """
+        Compute the total pseudo-differential symbol expression from all pseudo_terms.
+
+        This method constructs the full symbol of the pseudo-differential operator
+        by summing up all coefficient-weighted symbolic expressions.
+
+        The result is cached in self._symbol_expr to avoid recomputation.
+
+        Returns:
+            sympy.Expr: The combined symbol expression, representing the full
+                        pseudo-differential operator in symbolic form.
+
+        Example:
+            Given pseudo_terms = [(2, ξ²), (1, x·ξ)], this returns 2·ξ² + x·ξ.
+        """
+        if not hasattr(self, '_symbol_expr'):
+            self._symbol_expr = sum(coeff * expr for coeff, expr in self.pseudo_terms)
+        return self._symbol_expr
+
+    def _build_symbol_func(self, expr):
+        """
+        Build a numerical evaluation function from a symbolic pseudo-differential operator expression.
+    
+        This method converts a symbolic expression representing a pseudo-differential operator into
+        a callable NumPy-compatible function. The function accepts spatial and frequency variables
+        depending on the dimensionality of the problem.
+    
+        Parameters:
+            expr (sympy.Expr): A SymPy expression representing the symbol of the pseudo-differential operator.
+                                It may depend on spatial variables (x, y) and frequency variables (xi, eta).
+    
+        Returns:
+            function: A lambdified function that takes:
+                - In 1D: `(x, xi)` — spatial coordinate and frequency.
+                - In 2D: `(x, y, xi, eta)` — spatial coordinates and frequencies.
+              Returns a NumPy array of evaluated symbol values over input grids.
+    
+        Notes:
+            - Uses `lambdify` from SymPy with the `'numpy'` backend for efficient vectorized evaluation.
+            - Real variable assumptions are enforced to ensure proper behavior in numerical contexts.
+            - Used internally by methods like `apply_psiOp`, `evaluate`, and visualization tools.
+        """
+        if self.dim == 1:
+            x, xi = symbols('x xi', real=True)
+            return lambdify((x, xi), expr, 'numpy')
+        else:
+            x, y, xi, eta = symbols('x y xi eta', real=True)
+            return lambdify((x, y, xi, eta), expr, 'numpy')
 
     def apply_psiOp(self, u):
         """
-        Apply pseudo-differential operators to the input field using precomputed symbols.
+        Apply the pseudo-differential operator to the input field u.
     
-        This method applies a pseudo-differential operator to the solution array `u`. It distinguishes between two cases:
+        This method dispatches the application of the pseudo-differential operator based on:
+        - Whether the symbol is spatially dependent (x/y)
+        - The boundary condition in use (periodic or dirichlet)
     
-        1. **Spectral multiplier case**: When the symbol of the operator does not depend on spatial variables (i.e., it is purely frequency-dependent), the operator is applied efficiently via Fourier multiplication:
-           Op(p(D))u = ℱ⁻¹ [p(ξ) · ℱ(u)] 
-           
-        2. **Kohn-Nirenberg quantization case**: When the symbol depends on both spatial and frequency variables (e.g., p(x, ξ)), the full Kohn-Nirenberg quantization is used:
-           Op(p(x,D))u = (1/(2π)^d) ∫ p(x,ξ) eⁱˣ˙ξ ℱ(u)(ξ) dξ
+        Supported operations:
+        - Constant-coefficient symbols: applied via Fourier multiplication.
+        - Spatially varying symbols: applied via Kohn–Nirenberg quantization.
+        - Dirichlet boundary conditions: handled with non-periodic convolution-like quantization.
     
-        The method automatically detects whether any of the symbols depend on spatial variables and selects the appropriate computational path.
+        Dispatch Logic:
+        if not self.is_spatial:
+            u ↦ Op(p)(D) ⋅ u = 𝓕⁻¹[ p(ξ) ⋅ 𝓕(u) ]
+        elif periodic:
+            u ↦ Op(p)(x,D) ⋅ u ≈ ∫ eᶦˣᶿ p(x, ξ) 𝓕(u)(ξ) dξ
+        elif dirichlet:
+            u ↦ Op(p)(x,y,D) ⋅ u ≈ non-periodic extension + convolution
     
-        Parameters
-        ----------
-        u : np.ndarray
-            The input solution array in physical space. Can be one-dimensional (1D) or two-dimensional (2D), depending on the spatial dimension of the problem.
+        Parameters:
+            u (np.ndarray): Input field to which the operator is applied.
+                            Should be 1D or 2D depending on the problem dimension.
     
-        Returns
-        -------
-        np.ndarray
-            The updated solution array after applying the pseudo-differential operator, returned in physical space.
+        Returns:
+            np.ndarray: Result of applying the pseudo-differential operator to u.
     
-        Notes
-        -----
-        - The spectral multiplier path uses precomputed symbolic values stored in `self.precomputed_symbols` and performs fast convolution via FFT.
-        - The Kohn-Nirenberg path dynamically constructs a callable from the symbolic expression and evaluates the pseudo-differential operator using numerical integration in phase space.
-        - This method assumes that the symbols have already been evaluated and stored during setup via `prepare_symbol_tables`.
-    
-        See Also
-        --------
-        prepare_symbol_tables : Precomputes and stores symbolic arrays for use with this method.
-        kohn_nirenberg_fft : Performs the numerical integration required for general pseudo-differential operators.
+        Raises:
+            ValueError: If an unsupported boundary condition is specified.
         """
-        # Check if any symbol depends on spatial variables using symbolic expressions
-        use_kohn_nirenberg = False
-        for coeff, expr in self.pseudo_terms:
-            if expr.has(self.x) or (self.dim == 2 and expr.has(self.y)):
-                use_kohn_nirenberg = True
-                break
-    
-        if not use_kohn_nirenberg:
-            # Fast path: pure spectral multiplier (no x/y dependence)
-            u_hat = self.fft(u)
-            u_hat *= -self.combined_symbol
-            u_hat *= self.dealiasing_mask
-            return self.ifft(u_hat)
+        if not self.is_spatial:
+            return self._apply_psiOp_constant(u)
+        elif self.boundary_condition == 'periodic':
+            return self._apply_psiOp_kohn_nirenberg_fft(u)
+        elif self.boundary_condition == 'dirichlet':
+            return self._apply_psiOp_kohn_nirenberg_nonperiodic(u)
         else:
-            # Slow but accurate path: apply Kohn-Nirenberg quantization
-            def build_symbol_func(symbol_expr):
-                if self.dim == 1:
-                    x, xi = symbols('x xi', real=True)
-                    return lambdify((x, xi), symbol_expr, 'numpy')
-                else:
-                    x, y, xi, eta = symbols('x y xi eta', real=True)
-                    return lambdify((x, y, xi, eta), symbol_expr, 'numpy')
-    
-            total_symbol = 0
-            for coeff, expr in self.pseudo_terms:
-                total_symbol += coeff * expr
-            symbol_func = build_symbol_func(total_symbol)
-            
-            if self.boundary_condition == 'periodic':
-                return self.kohn_nirenberg_fft(u_vals=u, symbol_func=symbol_func)
-            elif self.boundary_condition == 'dirichlet':
-                if self.dim == 1:
-                    return self.kohn_nirenberg_nonperiodic(u_vals=u, x_grid=self.x_grid, xi_grid=self.KX, symbol_func=symbol_func)
-                elif self.dim == 2:
-                    return self.kohn_nirenberg_nonperiodic(u_vals=u, x_grid=(self.x_grid, self.y_grid),
-                                                           xi_grid=(self.KX, self.KY), symbol_func=symbol_func)    
-            else:
-                raise ValueError(
-                    f"Invalid boundary condition '{self.boundary_condition}'. "
-                    "Supported types are 'periodic' and 'dirichlet'."
-                )
+            raise ValueError(f"Invalid boundary condition '{self.boundary_condition}'")
 
-    def apply_psiOp_1t(self, u):
+    def _apply_psiOp_constant(self, u):
         """
-        Apply the exponential of a pseudo-differential operator to the input field.
-    
-        This method computes the action of the exponential operator e^{-dt·P(D)} or the full
-        Kohn-Nirenberg quantization of P(x,D) on the solution array `u`, where P is a 
-        pseudo-differential operator defined by its symbol. It distinguishes between two cases:
-    
-        1. **Spectral multiplier case**: When the symbol depends only on frequency variables (ξ or (ξ,η)),
-           the exponential operator is applied efficiently via Fourier multiplication:
-           e^{-dt·P(D)}u = ℱ⁻¹ [exp(-dt·P(ξ)) · ℱ(u)]
-    
-        2. **Kohn-Nirenberg quantization case**: When the symbol also depends on spatial variables (x or (x,y)), 
-           the full Kohn-Nirenberg quantization is used:
-           Op(P(x,D))u = (1/(2π)^d) ∫ P(x, ξ) e^{i x·ξ} ℱ(u)(ξ) dξ
-    
-        The method automatically detects whether any of the symbols depend on spatial variables 
-        and selects the appropriate computational path.
-    
-        Parameters
-        ----------
-        u : np.ndarray
-            The input solution array in physical space. Can be one-dimensional (1D) or 
-            two-dimensional (2D), depending on the spatial dimension of the problem.
-    
-        Returns
-        -------
-        np.ndarray
-            The updated solution array after applying the exponential pseudo-differential operator, 
-            returned in physical space.
-    
-        Notes
-        -----
-        - In the spectral multiplier case, this method uses precomputed symbolic values stored in 
-          `self.combined_symbol` and performs fast convolution via FFT.
-        - In the Kohn-Nirenberg case, the method dynamically constructs a callable from the symbolic 
-          expression and evaluates the exponential operator using numerical integration in phase space.
-        - This method assumes that the symbols have already been evaluated and stored during setup 
-          via `prepare_symbol_tables`.
-    
-        See Also
+        Apply a constant-coefficient pseudo-differential operator in Fourier space.
+
+        This method assumes the symbol is diagonal in the Fourier basis and acts as a 
+        multiplication operator. It performs the operation:
+        
+            (ψu)(x) = 𝓕⁻¹[ -σ(k) · 𝓕[u](k) ]
+
+        where:
+        - σ(k) is the combined pseudo-differential operator symbol
+        - 𝓕 denotes the forward Fourier transform
+        - 𝓕⁻¹ denotes the inverse Fourier transform
+
+        The dealiasing mask is applied before returning to physical space.
+        
+        Parameters:
+        -----------
+        u : numpy.ndarray
+            Input function in physical space (real-valued or complex-valued)
+
+        Returns:
         --------
-        prepare_symbol_tables : Precomputes and stores symbolic arrays for use with this method.
-        kohn_nirenberg_fft : Performs the numerical integration required for general pseudo-differential operators.
-        psiOp_apply : Applies a non-exponential pseudo-differential operator directly.
+        numpy.ndarray
+            Result of applying the pseudo-differential operator to u, same shape as input
         """
-        # Check if any symbol depends on spatial variables using symbolic expressions
-        use_kohn_nirenberg = False
-        for coeff, expr in self.pseudo_terms:
-            if expr.has(self.x) or (self.dim == 2 and expr.has(self.y)):
-                use_kohn_nirenberg = True
-                break
+        u_hat = self.fft(u)
+        u_hat *= -self.combined_symbol
+        u_hat *= self.dealiasing_mask
+        return self.ifft(u_hat)
+
+    def _apply_psiOp_kohn_nirenberg_fft(self, u):
+        """
+        Apply a pseudo-differential operator using the Kohn–Nirenberg quantization in Fourier space.
     
-        if not use_kohn_nirenberg:
-            # Fast path: pure spectral multiplier (no x/y dependence)
-            u_hat = self.fft(u)
+        This method evaluates the action of a pseudo-differential operator defined by the total symbol,
+        computed from all psiOp terms in the equation. It uses the fast Fourier transform (FFT) for
+        efficiency in periodic domains.
+    
+        Parameters:
+            u (np.ndarray): Input function in real space to which the operator is applied.
+    
+        Returns:
+            np.ndarray: Resulting function after applying the pseudo-differential operator.
+    
+        Process:
+            1. Compute the total symbolic expression of the pseudo-differential operator.
+            2. Build a callable numerical function from the symbol.
+            3. Evaluate Op(p)(u) via the Kohn–Nirenberg quantization using FFT.
+    
+        Note:
+            - Assumes periodic boundary conditions.
+            - The returned result is the negative of the standard definition due to PDE sign conventions.
+        """
+        total_symbol = self._total_symbol_expr()
+        symbol_func = self._build_symbol_func(total_symbol)
+        return -self.kohn_nirenberg_fft(u_vals=u, symbol_func=symbol_func)
+
+    def _apply_psiOp_kohn_nirenberg_nonperiodic(self, u):
+        """
+        Apply a pseudo-differential operator using the Kohn–Nirenberg quantization on non-periodic domains.
+    
+        This method evaluates the action of a pseudo-differential operator Op(p) on a function u 
+        via the Kohn–Nirenberg representation. It supports both 1D and 2D cases and uses spatial 
+        and frequency grids to evaluate the operator symbol p(x, ξ).
+    
+        The operator symbol p(x, ξ) is extracted from the PDE and evaluated numerically using 
+        `_total_symbol_expr` and `_build_symbol_func`.
+    
+        Parameters:
+            u (np.ndarray): Input function (real space) to which the operator is applied.
+    
+        Returns:
+            np.ndarray: Result of applying Op(p) to u in real space.
+    
+        Notes:
+            - For 1D: p(x, ξ) is evaluated over x_grid and xi_grid.
+            - For 2D: p(x, y, ξ, η) is evaluated over (x_grid, y_grid) and (xi_grid, eta_grid).
+            - The result is computed using `kohn_nirenberg_nonperiodic`, which handles non-periodic boundary conditions.
+        """
+        total_symbol = self._total_symbol_expr()
+        symbol_func = self._build_symbol_func(total_symbol)
+        if self.dim == 1:
+            return -self.kohn_nirenberg_nonperiodic(u_vals=u, x_grid=self.x_grid, xi_grid=self.kx, symbol_func=symbol_func)
+        else:
+            return -self.kohn_nirenberg_nonperiodic(u_vals=u, x_grid=(self.x_grid, self.y_grid), xi_grid=(self.kx, self.ky), symbol_func=symbol_func)
+    
+    
+    def _step_order1_with_psi(self, source_contribution):
+        """
+        Advance the solution by one time step for first-order PDEs with pseudo-differential operators (ψOp).
+    
+        This method integrates the solution forward in time using an exponential integrator scheme.
+        It supports both periodic boundary conditions with direct Fourier space evolution,
+        and general spatially varying symbols using ETD1 (Exponential Time Differencing of order 1).
+    
+        Algorithm:
+        ──────────
+        For periodic boundary conditions and constant-in-space symbols:
+    
+            u_hat = FFT(uₙ)
+            u_hat ← exp(-Δt ⋅ L) ⋅ u_hat
+            u_symb = IFFT(u_hat)
+            u_new = u_symb + N(uₙ) + source
+    
+        For non-periodic or spatially varying symbols (ETD1):
+    
+            L = combined symbol from ψOp
+            exp_L = exp(-Δt ⋅ L)
+            phi1_L = (exp_L - 1) / (-Δt ⋅ L), with limit handling
+            u_hat_new = exp_L ⋅ FFT(uₙ) + Δt ⋅ phi1_L ⋅ (FFT(N(uₙ)) + FFT(source))
+            u_new = IFFT(u_hat_new)
+    
+        where:
+            uₙ      = current solution
+            N(uₙ)   = nonlinear terms evaluated at uₙ
+            L       = linear operator (from ψOp)
+            Δt      = time step size
+    
+        Parameters:
+        ────────────
+        source_contribution : float or np.ndarray
+            External source term to be added during the update. If scalar, a zero-filled array matching
+            the shape of self.u_prev is created.
+    
+        Returns:
+        ─────────
+        u_new : np.ndarray
+            The updated solution after one time step.
+    
+        Notes:
+        ──────
+        - Recomputes the symbol if it depends on spatial variables (self.is_spatial).
+        - Applies dealiasing mask in Fourier space to avoid aliasing errors.
+        - Supports both 1D and 2D configurations seamlessly.
+        - Handles division-by-zero in phi1_L safely via np.isnan replacement.
+        """
+
+        # Handling null source
+        if np.isscalar(source_contribution):
+            source = np.zeros_like(self.u_prev)
+        else:
+            source = source_contribution
+    
+        # Recalculate symbol if necessary
+        if self.is_spatial:
+            self.prepare_symbol_tables()  # Recalculates self.combined_symbol
+    
+        # Case with FFT (symbol diagonalizable in Fourier space)
+        if self.boundary_condition == 'periodic' and not self.is_spatial:
+            u_hat = self.fft(self.u_prev)
             u_hat *= np.exp(-self.dt * self.combined_symbol)
             u_hat *= self.dealiasing_mask
-            return self.ifft(u_hat)
+            u_symb = self.ifft(u_hat)
+            u_nl = self.apply_nonlinear(self.u_prev)
+            u_new = u_symb + u_nl + source
         else:
-            # Slow but accurate path: apply Kohn-Nirenberg quantization
-            def build_symbol_func(symbol_expr):
-                if self.dim == 1:
-                    x, xi = symbols('x xi', real=True)
-                    return lambdify((x, xi), symbol_expr, 'numpy')
-                else:
-                    x, y, xi, eta = symbols('x y xi eta', real=True)
-                    return lambdify((x, y, xi, eta), symbol_expr, 'numpy')
+            # General case with ETD1
+            u_nl = self.apply_nonlinear(self.u_prev)
     
-            total_symbol = 0
-            for coeff, expr in self.pseudo_terms:
-                total_symbol += coeff * expr
-            symbol_func = build_symbol_func(total_symbol)
-            if self.boundary_condition == 'periodic':
-                return self.kohn_nirenberg_fft(u_vals=u, symbol_func=symbol_func)
-            elif self.boundary_condition == 'dirichlet':
-                if self.dim == 1:
-                    return self.kohn_nirenberg_nonperiodic(u_vals=u, x_grid=self.x_grid, xi_grid=self.xi_grid, symbol_func=symbol_func)
-                elif self.dim == 2:
-                    return self.kohn_nirenberg_nonperiodic(u_vals=u, x_grid=(self.x_grid, self.y_grid),
-                                                           xi_grid=(self.xi_grid, self.eta_grid), symbol_func=symbol_func)    
-            else:
-                raise ValueError(
-                    f"Invalid boundary condition '{self.boundary_condition}'. "
-                    "Supported types are 'periodic' and 'dirichlet'."
-                )
+            # Calculation of exp(dt * L) and phi1(dt * L)
+            L_vals = self.combined_symbol  # Uses the updated symbol
+            exp_L = np.exp(-self.dt * L_vals)
+            phi1_L = (exp_L - 1.0) / (self.dt * L_vals)
+            phi1_L[np.isnan(phi1_L)] = 1.0  # Handling division by zero
+    
+            # Fourier transform
+            u_hat = self.fft(self.u_prev)
+            u_nl_hat = self.fft(u_nl)
+            source_hat = self.fft(source)
+    
+            # Assembling the solution in Fourier space
+            u_hat_new = exp_L * u_hat + self.dt * phi1_L * (u_nl_hat + source_hat)
+            u_new = self.ifft(u_hat_new)
+    
+        # Applying boundary conditions
+        self.apply_boundary(u_new)
+        return u_new
+
+    def _step_order2_with_psi(self, source_contribution):
+        """
+        Perform one time step of a second-order time evolution using a pseudo-differential operator.
+    
+        This method updates the solution field using a second-order accurate scheme suitable for wave-like equations.
+        The update includes contributions from:
+        - Linear dynamics via a pseudo-differential operator (e.g., dispersion or stiffness)
+        - Nonlinear terms computed via spectral differentiation
+        - External source contributions
+    
+        Discretization follows a leapfrog-style finite difference in time:
+        
+            uₙ₊₁ = 2uₙ − uₙ₋₁ + Δt² ⋅ (L(uₙ) + N(uₙ) + F)
+    
+        where:
+            L(uₙ) = linear part evaluated via pseudo-differential operator
+            N(uₙ) = nonlinear contribution at current time step
+            F     = external source term at current time step
+            Δt    = time step size
+    
+        Boundary conditions are applied after each update to ensure consistency.
+    
+        Args:
+            source_contribution (np.ndarray): Array representing the external source term at current time step.
+                                              Must match the spatial dimensions of self.u_prev.
+    
+        Returns:
+            np.ndarray: Updated solution array after one time step.
+        """
+        Lu_prev = self.apply_psiOp(self.u_prev)
+        rhs_nl = self.apply_nonlinear(self.u_prev, is_v=False)
+        u_new = 2 * self.u_prev - self.u_prev2 + self.dt ** 2 * (Lu_prev + rhs_nl + source_contribution)
+        self.apply_boundary(u_new)
+        self.u_prev2 = self.u_prev
+        self.u_prev = u_new
+        self.u = u_new
+        return u_new
 
     def solve(self):
         """
-        Solve the PDE using the selected time integration scheme.
-    
-        This method evolves the solution forward in time based on initial conditions,
-        boundary conditions, and the structure of the PDE (linear or nonlinear).
-        It supports both first-order and second-order time evolution equations and uses
-        one of several high-order numerical integration schemes:
-    
-            - **Default exponential time-stepping**: Suitable for linear-dominated problems.
-            - **ETD-RK4 (Exponential Time Differencing with 4th order Runge-Kutta)**:
-              A high-order integrator for stiff systems, especially effective when nonlinear terms are present.
-            - **Leap-Frog method**: A second-order explicit scheme used specifically when pseudo-differential operators (ψOp) are present.
-    
-        The solver also handles optional source terms that may depend on space and time,
-        and records the solution at regular intervals for animation or analysis.
-        Energy conservation is monitored when applicable.
-    
-        Parameters
-        ----------
-        None
-    
-        Returns
-        -------
-        None
-            The solution is stored internally in `self.frames` at specified intervals.
-            Final state is kept in `self.u_prev` (and `self.v_prev` if second-order in time).
-    
-        Notes
-        -----
-        - First-order equations are solved via exponential propagation of the linear part
-          plus a nonlinear correction term. ETD-RK4 can be activated by setting `time_scheme='ETD-RK4'`.
-        - Second-order equations without ψOp use a spectral Fourier-based propagator derived from the dispersion relation.
-        - When ψOp is active, the Leap-Frog method is used for second-order equations.
-        - Source terms are evaluated dynamically at each time step using SymPy lambdification.
-        - Dealising is applied during FFT operations to prevent aliasing errors in nonlinear terms.
-        - Energy is computed and recorded only for second-order linear systems without ψOp.
-    
-        Integration Schemes
-        -------------------
-        - **First-order (default):**
-            u_new = e^(dt·L) · u_prev + dt · N(u_prev)
-    
-        - **First-order (ETD-RK4):**
-            Uses a 4th-order Runge-Kutta formulation in the exponential integrator framework.
-    
-        - **Second-order (no ψOp):**
-            u_new = cos(ω·dt) · u_prev + (sin(ω·dt)/ω) · v_prev + (dt²/2) · N(u_prev)
-            v_new = -ω · sin(ω·dt) · u_prev + cos(ω·dt) · v_prev + dt · N(u_prev)
-    
-        - **Second-order (with ψOp – Leap-Frog):**
-            uⁿ⁺¹ = 2uⁿ − uⁿ⁻¹ + dt² [L(uⁿ) + N(uⁿ) + f(x,t)]
-    
-        Example Usage
-        -------------
-        >>> solver.setup(Lx=2*np.pi, Nx=256, Lt=10.0, Nt=1000, initial_condition=initial)
-        >>> solver.solve()
-        >>> ani = solver.animate()
-        >>> HTML(ani.to_jshtml())
+        Solve the partial differential equation numerically using spectral methods.
+        
+        This method evolves the solution in time using a combination of:
+        - Fourier-based linear evolution (with dealiasing)
+        - Nonlinear term handling via pseudo-spectral evaluation
+        - Support for pseudo-differential operators (psiOp)
+        - Source terms and boundary conditions
+        
+        The solver supports:
+        - 1D and 2D spatial domains
+        - First and second-order time evolution
+        - Periodic and Dirichlet boundary conditions
+        - Time-stepping schemes: default, ETD-RK4
+        
+        Returns:
+            list[np.ndarray]: A list of solution arrays at each saved time frame.
+        
+        Side Effects:
+            - Updates self.frames: stores solution snapshots
+            - Updates self.energy_history: records total energy if enabled
+            
+        Algorithm Overview:
+            For each time step:
+                1. Evaluate source contributions (if any)
+                2. Apply time evolution:
+                    - Order 1:
+                        - With psiOp: uses _step_order1_with_psi
+                        - With ETD-RK4: exponential time differencing
+                        - Default: linear + nonlinear update
+                    - Order 2:
+                        - With psiOp: uses _step_order2_with_psi
+                        - With ETD-RK4: second-order exponential scheme
+                        - Default: second-order leapfrog-style update
+                3. Enforce boundary conditions
+                4. Save solution snapshot periodically
+                5. Record energy (for second-order systems without psiOp)
         """
-        print("\n*******************")
-        print("* Solving the PDE *")
-        print("*******************\n")
-    
+        print('\n*******************')
+        print('* Solving the PDE *')
+        print('*******************\n')
         save_interval = max(1, self.Nt // self.n_frames)
         self.energy_history = []
-    
         for step in range(self.Nt):
-            # Evaluate source term
             if hasattr(self, 'source_terms') and self.source_terms:
                 source_contribution = np.zeros_like(self.X, dtype=np.float64)
                 for term in self.source_terms:
@@ -3269,76 +3376,55 @@ class PDESolver:
                             source_func = lambdify((self.t, self.x, self.y), term, 'numpy')
                             source_contribution += source_func(step * self.dt, self.X, self.Y)
                     except Exception as e:
-                        print(f"Error evaluating source term {term}: {e}")
+                        print(f'Error evaluating source term {term}: {e}')
             else:
                 source_contribution = 0
-    
-            # First-order in time
+
             if self.temporal_order == 1:
                 if self.has_psi:
-                    u_sym = self.apply_psiOp_1t(self.u_prev)
-                    u_nl = self.apply_nonlinear(u_sym)
-                    u_new = u_sym + u_nl
+                    u_new = self._step_order1_with_psi(source_contribution)
+                elif hasattr(self, 'time_scheme') and self.time_scheme == 'ETD-RK4':
+                    u_new = self.step_ETD_RK4(self.u_prev)
                 else:
-                    if hasattr(self, 'time_scheme') and self.time_scheme == 'ETD-RK4':
-                        u_new = self.step_ETD_RK4(self.u_prev)
-                    else:
-                        u_hat = self.fft(self.u_prev)
-                        u_hat *= self.exp_L
-                        u_hat *= self.dealiasing_mask
-                        u_lin = self.ifft(u_hat)
-                        u_nl = self.apply_nonlinear(u_lin)
-                        u_new = u_lin + u_nl
-    
-                u_new = u_new + source_contribution
+                    u_hat = self.fft(self.u_prev)
+                    u_hat *= self.exp_L
+                    u_hat *= self.dealiasing_mask
+                    u_lin = self.ifft(u_hat)
+                    u_nl = self.apply_nonlinear(u_lin)
+                    u_new = u_lin + u_nl + source_contribution
                 self.apply_boundary(u_new)
                 self.u_prev = u_new
-    
-            # Second-order in time
+
             elif self.temporal_order == 2:
                 if self.has_psi:
-                    Lu_prev = self.apply_psiOp(self.u_prev)
-                    rhs_nl = self.apply_nonlinear(self.u_prev, is_v=False)
-                    u_new = 2 * self.u_prev - self.u_prev2 + self.dt**2 * (Lu_prev + rhs_nl + source_contribution)
-    
-                    self.apply_boundary(u_new)
-                    self.u_prev2 = self.u_prev
-                    self.u_prev = u_new
-                    self.u = u_new
+                    u_new = self._step_order2_with_psi(source_contribution)
                 else:
                     if hasattr(self, 'time_scheme') and self.time_scheme == 'ETD-RK4':
                         u_new, v_new = self.step_ETD_RK4_order2(self.u_prev, self.v_prev)
                     else:
                         u_hat = self.fft(self.u_prev)
                         v_hat = self.fft(self.v_prev)
-    
-                        u_new_hat = (self.cos_omega_dt * u_hat +
-                                     self.sin_omega_dt * self.inv_omega * v_hat)
-                        v_new_hat = (-self.omega_val * self.sin_omega_dt * u_hat +
-                                     self.cos_omega_dt * v_hat)
-    
+                        u_new_hat = self.cos_omega_dt * u_hat + self.sin_omega_dt * self.inv_omega * v_hat
+                        v_new_hat = -self.omega_val * self.sin_omega_dt * u_hat + self.cos_omega_dt * v_hat
                         u_new = self.ifft(u_new_hat)
                         v_new = self.ifft(v_new_hat)
-    
                         u_nl = self.apply_nonlinear(self.u_prev, is_v=False)
                         v_nl = self.apply_nonlinear(self.v_prev, is_v=True)
-    
-                        u_new += (u_nl + source_contribution) * (self.dt**2) / 2
+                        u_new += (u_nl + source_contribution) * self.dt ** 2 / 2
                         v_new += (u_nl + source_contribution) * self.dt
-    
                     self.apply_boundary(u_new)
                     self.apply_boundary(v_new)
                     self.u_prev = u_new
                     self.v_prev = v_new
-    
-            # Save current state
+
             if step % save_interval == 0:
                 self.frames.append(self.u_prev.copy())
-    
-            # Energy monitoring only in linear case without psiOp
-            if self.temporal_order == 2 and not self.has_psi:
+
+            if self.temporal_order == 2 and (not self.has_psi):
                 E = self.compute_energy()
-                self.energy_history.append(E)   
+                self.energy_history.append(E)
+
+        return self.frames  
                 
     def solve_stationary_psiOp(self, order=3):
         """
@@ -3498,7 +3584,7 @@ class PDESolver:
             elif self.dim == 2:
                 x, xi, y, eta = symbols('x xi y eta', real=True)
                 R_func = lambdify((x, y, xi, eta), R_symbol, 'numpy')
-                u = self.kohn_nirenberg_nonperiodic(u_vals=rhs, x_grid=(X, Y), xi_grid=(KX, KY), symbol_func=R_func)
+                u = self.kohn_nirenberg_nonperiodic(u_vals=rhs, x_grid=(self.x_grid, self.y_grid), xi_grid=(self.kx, self.ky), symbol_func=R_func)
             self.u = u
             return u   
         else:
