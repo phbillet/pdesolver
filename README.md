@@ -131,8 +131,10 @@ Several Jupyter notebooks are provided to test and demonstrate the capabilities 
 
 * `PDE_symbolic_tester.ipynb`: Verifies the correctness of exact solutions for 1D and 2D symbolic PDEs.
 * `PDESolver_psiOp_tester.ipynb`: Tests the features of the PseudoDifferentialOperator class, including symbol evaluation and visualization.
-* `PDESolver_tester_1D.ipynb`: Exercises the PDESolver class on various 1D PDEs such as the heat equation, wave equation, and equations with nonlocal or fractional operators.
-* `PDESolver_tester_2D.ipynb`: Tests the PDESolver class on 2D PDEs including the heat equation, wave equation, and the Klein–Gordon equation.
+* `PDESolver_tester_1D_periodic.ipynb`: Exercises the PDESolver class on various 1D PDEs such as the heat equation, wave equation, and equations with nonlocal or fractional operators in periodic conditions.
+* `PDESolver_tester_1D_Dirichlet.ipynb`: Exercises the PDESolver class on various 1D PDEs such as the heat, wave, Schrödinger, Airy, Hermite and Legendre equations  in Dirichlet conditions.
+* `PDESolver_tester_2D_periodic.ipynb`: Tests the PDESolver class on 2D PDEs including the heat equation, wave equation, and the Klein–Gordon equation in periodic conditions.
+* `PDESolver_tester_2D_Dirichlet.ipynb`: Tests the PDESolver class on 2D PDEs including some equations in Dirichlet conditions.
 
 These notebooks serve both as validation tools and as usage examples. They are ideal entry points for new users wishing to understand the solver's capabilities.
 
