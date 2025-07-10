@@ -92,7 +92,7 @@ from sympy import (
 )
 from sympy.core.function import AppliedUndef
 from IPython.display import display
-from scipy.special import legendre, eval_hermite, airy
+from scipy.special import legendre, eval_hermite, airy, eval_genlaguerre
 from matplotlib import cm
 from matplotlib.animation import FuncAnimation
 import matplotlib.animation as animation
@@ -1984,7 +1984,7 @@ class PDESolver:
     >>> ani = solver.animate()
     >>> HTML(ani.to_jshtml())  # Display animation in Jupyter notebook
     """
-    def __init__(self, equation, time_scheme='default', dealiasing_ratio=2/3):
+    def __init__(self, equation, time_scheme='default', dealiasing_ratio=2/3, verbose=False):
         """
         Initialize the PDE solver with a given equation.
 
@@ -2029,6 +2029,7 @@ class PDESolver:
             ValueError: If the equation does not contain exactly one unknown function,
                         if unsupported dimensions are detected, or invalid dependencies.
         """
+        self.verbose = verbose
         self.time_scheme = time_scheme # 'default'  or 'ETD-RK4'
         self.dealiasing_ratio = dealiasing_ratio
         
@@ -3134,6 +3135,8 @@ class PDESolver:
         Raises:
             ValueError: If an unsupported boundary condition is specified.
         """
+        if self.verbose:
+            print("apply_psiOp")
         if not self.is_spatial:
             return self.apply_psiOp_constant(u)
         elif self.boundary_condition == 'periodic':
@@ -3169,6 +3172,8 @@ class PDESolver:
         numpy.ndarray
             Result of applying the pseudo-differential operator to u, same shape as input
         """
+        if self.verbose:
+            print("apply_psiOp_constant")
         u_hat = self.fft(u)
         u_hat *= -self.combined_symbol
         u_hat *= self.dealiasing_mask
@@ -3197,6 +3202,8 @@ class PDESolver:
             - Assumes periodic boundary conditions.
             - The returned result is the negative of the standard definition due to PDE sign conventions.
         """
+        if self.verbose:
+            print("apply_psiOp_kohn_nirenberg_fft")
         total_symbol = self.total_symbol_expr()
         symbol_func = self.build_symbol_func(total_symbol)
         return -self.kohn_nirenberg_fft(u_vals=u, symbol_func=symbol_func)
@@ -3223,6 +3230,8 @@ class PDESolver:
             - For 2D: p(x, y, ξ, η) is evaluated over (x_grid, y_grid) and (xi_grid, eta_grid).
             - The result is computed using `kohn_nirenberg_nonperiodic`, which handles non-periodic boundary conditions.
         """
+        if self.verbose:
+            print("apply_psiOp_kohn_nirenberg_nonperiodic")
         total_symbol = self.total_symbol_expr()
         symbol_func = self.build_symbol_func(total_symbol)
         if self.dim == 1:
@@ -3280,7 +3289,8 @@ class PDESolver:
         - Supports both 1D and 2D configurations seamlessly.
         - Handles division-by-zero in phi1_L safely via np.isnan replacement.
         """
-
+        if self.verbose:
+            print("step_order1_with_psi")
         # Handling null source
         if np.isscalar(source_contribution):
             source = np.zeros_like(self.u_prev)
@@ -3293,6 +3303,8 @@ class PDESolver:
     
         # Case with FFT (symbol diagonalizable in Fourier space)
         if self.boundary_condition == 'periodic' and not self.is_spatial:
+            if self.verbose:
+                print("periodic free of spatial variables")
             u_hat = self.fft(self.u_prev)
             u_hat *= np.exp(-self.dt * self.combined_symbol)
             u_hat *= self.dealiasing_mask
@@ -3300,6 +3312,12 @@ class PDESolver:
             u_nl = self.apply_nonlinear(self.u_prev)
             u_new = u_symb + u_nl + source
         else:
+            if self.is_spatial:
+                print("⚠️ For psiOp depending on spatial variables and temporal order 1") 
+                print("⚠️ the method is not implemented, it simply uses symbol evaluted") 
+                print("⚠️ at this point, which is FALSE !!!") 
+            if self.verbose:
+                print("ETD1")
             # General case with ETD1
             u_nl = self.apply_nonlinear(self.u_prev)
     
@@ -3317,6 +3335,15 @@ class PDESolver:
             # Assembling the solution in Fourier space
             u_hat_new = exp_L * u_hat + self.dt * phi1_L * (u_nl_hat + source_hat)
             u_new = self.ifft(u_hat_new)
+#            else:
+#                if self.verbose:
+#                    print("With of spatial variables")
+#                u_nl = self.apply_nonlinear(self.u_prev)
+#                Lu_prev_1 = self.apply_psiOp(self.u_prev)
+#                u_prev_2 = self.u_prev + self.dt * Lu_prev_1
+#                Lu_prev_2 = self.apply_psiOp(u_prev_2)
+#                u_new =  self.u_prev + 0.5 * self.dt * (Lu_prev_1 + Lu_prev_2)
+                
     
         # Applying boundary conditions
         self.apply_boundary(u_new)
@@ -3351,6 +3378,8 @@ class PDESolver:
         Returns:
             np.ndarray: Updated solution array after one time step.
         """
+        if self.verbose:
+            print("step_order2_with_psi")
         Lu_prev = self.apply_psiOp(self.u_prev)
         rhs_nl = self.apply_nonlinear(self.u_prev, is_v=False)
         u_new = 2 * self.u_prev - self.u_prev2 + self.dt ** 2 * (Lu_prev + rhs_nl + source_contribution)
