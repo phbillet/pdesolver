@@ -1984,7 +1984,7 @@ class PDESolver:
     >>> ani = solver.animate()
     >>> HTML(ani.to_jshtml())  # Display animation in Jupyter notebook
     """
-    def __init__(self, equation, time_scheme='default', dealiasing_ratio=2/3, verbose=False):
+    def __init__(self, equation, time_scheme='default', dealiasing_ratio=2/3):
         """
         Initialize the PDE solver with a given equation.
 
@@ -2029,7 +2029,6 @@ class PDESolver:
             ValueError: If the equation does not contain exactly one unknown function,
                         if unsupported dimensions are detected, or invalid dependencies.
         """
-        self.verbose = verbose
         self.time_scheme = time_scheme # 'default'  or 'ETD-RK4'
         self.dealiasing_ratio = dealiasing_ratio
         
@@ -3135,8 +3134,6 @@ class PDESolver:
         Raises:
             ValueError: If an unsupported boundary condition is specified.
         """
-        if self.verbose:
-            print("apply_psiOp")
         if not self.is_spatial:
             return self.apply_psiOp_constant(u)
         elif self.boundary_condition == 'periodic':
@@ -3172,8 +3169,6 @@ class PDESolver:
         numpy.ndarray
             Result of applying the pseudo-differential operator to u, same shape as input
         """
-        if self.verbose:
-            print("apply_psiOp_constant")
         u_hat = self.fft(u)
         u_hat *= -self.combined_symbol
         u_hat *= self.dealiasing_mask
@@ -3202,8 +3197,6 @@ class PDESolver:
             - Assumes periodic boundary conditions.
             - The returned result is the negative of the standard definition due to PDE sign conventions.
         """
-        if self.verbose:
-            print("apply_psiOp_kohn_nirenberg_fft")
         total_symbol = self.total_symbol_expr()
         symbol_func = self.build_symbol_func(total_symbol)
         return -self.kohn_nirenberg_fft(u_vals=u, symbol_func=symbol_func)
@@ -3230,67 +3223,54 @@ class PDESolver:
             - For 2D: p(x, y, ξ, η) is evaluated over (x_grid, y_grid) and (xi_grid, eta_grid).
             - The result is computed using `kohn_nirenberg_nonperiodic`, which handles non-periodic boundary conditions.
         """
-        if self.verbose:
-            print("apply_psiOp_kohn_nirenberg_nonperiodic")
         total_symbol = self.total_symbol_expr()
         symbol_func = self.build_symbol_func(total_symbol)
         if self.dim == 1:
             return -self.kohn_nirenberg_nonperiodic(u_vals=u, x_grid=self.x_grid, xi_grid=self.kx, symbol_func=symbol_func)
         else:
             return -self.kohn_nirenberg_nonperiodic(u_vals=u, x_grid=(self.x_grid, self.y_grid), xi_grid=(self.kx, self.ky), symbol_func=symbol_func)
-    
-    
+     
     def step_order1_with_psi(self, source_contribution):
         """
-        Advance the solution by one time step for first-order PDEs with pseudo-differential operators (ψOp).
+        Perform one time step of a first-order evolution using a pseudo-differential operator.
     
-        This method integrates the solution forward in time using an exponential integrator scheme.
-        It supports both periodic boundary conditions with direct Fourier space evolution,
-        and general spatially varying symbols using ETD1 (Exponential Time Differencing of order 1).
+        This method updates the solution field using an exponential integrator or explicit Euler scheme,
+        depending on boundary conditions and the structure of the pseudo-differential symbol.
+        It supports:
+        - Linear dynamics via pseudo-differential operator L (possibly nonlocal)
+        - Nonlinear terms computed via spectral differentiation
+        - External source contributions
     
-        Algorithm:
-        ──────────
-        For periodic boundary conditions and constant-in-space symbols:
+        The update follows **three distinct computational paths**:
     
-            u_hat = FFT(uₙ)
-            u_hat ← exp(-Δt ⋅ L) ⋅ u_hat
-            u_symb = IFFT(u_hat)
-            u_new = u_symb + N(uₙ) + source
+        1. **Periodic boundaries + diagonalizable symbol**  
+           Symbol is constant in space → use direct Fourier-based exponential integrator:  
+               uₙ₊₁ = e⁻ᴸΔᵗ ⋅ uₙ + Δt ⋅ φ₁(−LΔt) ⋅ (N(uₙ) + F)
     
-        For non-periodic or spatially varying symbols (ETD1):
+        2. **Non-diagonalizable but spatially uniform symbol**  
+           General exponential time differencing of order 1:  
+               uₙ₊₁ = eᴸΔᵗ ⋅ uₙ + Δt ⋅ φ₁(LΔt) ⋅ (N(uₙ) + F)
     
-            L = combined symbol from ψOp
-            exp_L = exp(-Δt ⋅ L)
-            phi1_L = (exp_L - 1) / (-Δt ⋅ L), with limit handling
-            u_hat_new = exp_L ⋅ FFT(uₙ) + Δt ⋅ phi1_L ⋅ (FFT(N(uₙ)) + FFT(source))
-            u_new = IFFT(u_hat_new)
+        3. **Spatially varying symbol**  
+           No frequency diagonalization available → use explicit Euler:  
+               uₙ₊₁ = uₙ + Δt ⋅ (L(uₙ) + N(uₙ) + F)
     
         where:
-            uₙ      = current solution
-            N(uₙ)   = nonlinear terms evaluated at uₙ
-            L       = linear operator (from ψOp)
-            Δt      = time step size
+            L(uₙ) = linear part via pseudo-differential operator
+            N(uₙ) = nonlinear contribution at current time step
+            F     = external source term
+            Δt    = time step size
+            φ₁(z) = (eᶻ − 1)/z (with safe handling near z=0)
     
-        Parameters:
-        ────────────
-        source_contribution : float or np.ndarray
-            External source term to be added during the update. If scalar, a zero-filled array matching
-            the shape of self.u_prev is created.
+        Boundary conditions are applied after each update to ensure consistency.
+    
+        Args:
+            source_contribution (np.ndarray): Array representing the external source term at current time step.
+                                              Must match the spatial dimensions of self.u_prev.
     
         Returns:
-        ─────────
-        u_new : np.ndarray
-            The updated solution after one time step.
-    
-        Notes:
-        ──────
-        - Recomputes the symbol if it depends on spatial variables (self.is_spatial).
-        - Applies dealiasing mask in Fourier space to avoid aliasing errors.
-        - Supports both 1D and 2D configurations seamlessly.
-        - Handles division-by-zero in phi1_L safely via np.isnan replacement.
+            np.ndarray: Updated solution array after one time step.
         """
-        if self.verbose:
-            print("step_order1_with_psi")
         # Handling null source
         if np.isscalar(source_contribution):
             source = np.zeros_like(self.u_prev)
@@ -3303,8 +3283,6 @@ class PDESolver:
     
         # Case with FFT (symbol diagonalizable in Fourier space)
         if self.boundary_condition == 'periodic' and not self.is_spatial:
-            if self.verbose:
-                print("periodic free of spatial variables")
             u_hat = self.fft(self.u_prev)
             u_hat *= np.exp(-self.dt * self.combined_symbol)
             u_hat *= self.dealiasing_mask
@@ -3312,39 +3290,31 @@ class PDESolver:
             u_nl = self.apply_nonlinear(self.u_prev)
             u_new = u_symb + u_nl + source
         else:
-            if self.is_spatial:
-                print("⚠️ For psiOp depending on spatial variables and temporal order 1") 
-                print("⚠️ the method is not implemented, it simply uses symbol evaluted") 
-                print("⚠️ at this point, which is FALSE !!!") 
-            if self.verbose:
-                print("ETD1")
-            # General case with ETD1
-            u_nl = self.apply_nonlinear(self.u_prev)
+            if not self.is_spatial:
+                # General case with ETD1
+                u_nl = self.apply_nonlinear(self.u_prev)
     
-            # Calculation of exp(dt * L) and phi1(dt * L)
-            L_vals = self.combined_symbol  # Uses the updated symbol
-            exp_L = np.exp(-self.dt * L_vals)
-            phi1_L = (exp_L - 1.0) / (self.dt * L_vals)
-            phi1_L[np.isnan(phi1_L)] = 1.0  # Handling division by zero
+                # Calculation of exp(dt * L) and phi1(dt * L)
+                L_vals = self.combined_symbol  # Uses the updated symbol
+                exp_L = np.exp(-self.dt * L_vals)
+                phi1_L = (exp_L - 1.0) / (self.dt * L_vals)
+                phi1_L[np.isnan(phi1_L)] = 1.0  # Handling division by zero
     
-            # Fourier transform
-            u_hat = self.fft(self.u_prev)
-            u_nl_hat = self.fft(u_nl)
-            source_hat = self.fft(source)
+                # Fourier transform
+                u_hat = self.fft(self.u_prev)
+                u_nl_hat = self.fft(u_nl)
+                source_hat = self.fft(source)
     
-            # Assembling the solution in Fourier space
-            u_hat_new = exp_L * u_hat + self.dt * phi1_L * (u_nl_hat + source_hat)
-            u_new = self.ifft(u_hat_new)
-#            else:
-#                if self.verbose:
-#                    print("With of spatial variables")
-#                u_nl = self.apply_nonlinear(self.u_prev)
-#                Lu_prev_1 = self.apply_psiOp(self.u_prev)
-#                u_prev_2 = self.u_prev + self.dt * Lu_prev_1
-#                Lu_prev_2 = self.apply_psiOp(u_prev_2)
-#                u_new =  self.u_prev + 0.5 * self.dt * (Lu_prev_1 + Lu_prev_2)
-                
-    
+                # Assembling the solution in Fourier space
+                u_hat_new = exp_L * u_hat + self.dt * phi1_L * (u_nl_hat + source_hat)
+                u_new = self.ifft(u_hat_new)
+            else:
+                # if the symbol depends on spatial variables : Euler method
+                # it works when the symbol is free of xi (and eta),
+                # otherwise the error becomes infinite....
+                Lu_prev = self.apply_psiOp(self.u_prev)
+                u_nl = self.apply_nonlinear(self.u_prev)
+                u_new = self.u_prev + self.dt * (Lu_prev + u_nl + source)
         # Applying boundary conditions
         self.apply_boundary(u_new)
         return u_new
@@ -3378,8 +3348,6 @@ class PDESolver:
         Returns:
             np.ndarray: Updated solution array after one time step.
         """
-        if self.verbose:
-            print("step_order2_with_psi")
         Lu_prev = self.apply_psiOp(self.u_prev)
         rhs_nl = self.apply_nonlinear(self.u_prev, is_v=False)
         u_new = 2 * self.u_prev - self.u_prev2 + self.dt ** 2 * (Lu_prev + rhs_nl + source_contribution)
