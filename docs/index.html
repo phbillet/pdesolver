@@ -169,7 +169,7 @@ from sympy import (
 )
 from sympy.core.function import AppliedUndef
 from IPython.display import display
-from scipy.special import legendre, eval_hermite, airy
+from scipy.special import legendre, eval_hermite, airy, eval_genlaguerre
 from matplotlib import cm
 from matplotlib.animation import FuncAnimation
 import matplotlib.animation as animation
@@ -3306,58 +3306,48 @@ class PDESolver:
             return -self.kohn_nirenberg_nonperiodic(u_vals=u, x_grid=self.x_grid, xi_grid=self.kx, symbol_func=symbol_func)
         else:
             return -self.kohn_nirenberg_nonperiodic(u_vals=u, x_grid=(self.x_grid, self.y_grid), xi_grid=(self.kx, self.ky), symbol_func=symbol_func)
-    
-    
+     
     def step_order1_with_psi(self, source_contribution):
         &#34;&#34;&#34;
-        Advance the solution by one time step for first-order PDEs with pseudo-differential operators (ψOp).
+        Perform one time step of a first-order evolution using a pseudo-differential operator.
     
-        This method integrates the solution forward in time using an exponential integrator scheme.
-        It supports both periodic boundary conditions with direct Fourier space evolution,
-        and general spatially varying symbols using ETD1 (Exponential Time Differencing of order 1).
+        This method updates the solution field using an exponential integrator or explicit Euler scheme,
+        depending on boundary conditions and the structure of the pseudo-differential symbol.
+        It supports:
+        - Linear dynamics via pseudo-differential operator L (possibly nonlocal)
+        - Nonlinear terms computed via spectral differentiation
+        - External source contributions
     
-        Algorithm:
-        ──────────
-        For periodic boundary conditions and constant-in-space symbols:
+        The update follows **three distinct computational paths**:
     
-            u_hat = FFT(uₙ)
-            u_hat ← exp(-Δt ⋅ L) ⋅ u_hat
-            u_symb = IFFT(u_hat)
-            u_new = u_symb + N(uₙ) + source
+        1. **Periodic boundaries + diagonalizable symbol**  
+           Symbol is constant in space → use direct Fourier-based exponential integrator:  
+               uₙ₊₁ = e⁻ᴸΔᵗ ⋅ uₙ + Δt ⋅ φ₁(−LΔt) ⋅ (N(uₙ) + F)
     
-        For non-periodic or spatially varying symbols (ETD1):
+        2. **Non-diagonalizable but spatially uniform symbol**  
+           General exponential time differencing of order 1:  
+               uₙ₊₁ = eᴸΔᵗ ⋅ uₙ + Δt ⋅ φ₁(LΔt) ⋅ (N(uₙ) + F)
     
-            L = combined symbol from ψOp
-            exp_L = exp(-Δt ⋅ L)
-            phi1_L = (exp_L - 1) / (-Δt ⋅ L), with limit handling
-            u_hat_new = exp_L ⋅ FFT(uₙ) + Δt ⋅ phi1_L ⋅ (FFT(N(uₙ)) + FFT(source))
-            u_new = IFFT(u_hat_new)
+        3. **Spatially varying symbol**  
+           No frequency diagonalization available → use explicit Euler:  
+               uₙ₊₁ = uₙ + Δt ⋅ (L(uₙ) + N(uₙ) + F)
     
         where:
-            uₙ      = current solution
-            N(uₙ)   = nonlinear terms evaluated at uₙ
-            L       = linear operator (from ψOp)
-            Δt      = time step size
+            L(uₙ) = linear part via pseudo-differential operator
+            N(uₙ) = nonlinear contribution at current time step
+            F     = external source term
+            Δt    = time step size
+            φ₁(z) = (eᶻ − 1)/z (with safe handling near z=0)
     
-        Parameters:
-        ────────────
-        source_contribution : float or np.ndarray
-            External source term to be added during the update. If scalar, a zero-filled array matching
-            the shape of self.u_prev is created.
+        Boundary conditions are applied after each update to ensure consistency.
+    
+        Args:
+            source_contribution (np.ndarray): Array representing the external source term at current time step.
+                                              Must match the spatial dimensions of self.u_prev.
     
         Returns:
-        ─────────
-        u_new : np.ndarray
-            The updated solution after one time step.
-    
-        Notes:
-        ──────
-        - Recomputes the symbol if it depends on spatial variables (self.is_spatial).
-        - Applies dealiasing mask in Fourier space to avoid aliasing errors.
-        - Supports both 1D and 2D configurations seamlessly.
-        - Handles division-by-zero in phi1_L safely via np.isnan replacement.
+            np.ndarray: Updated solution array after one time step.
         &#34;&#34;&#34;
-
         # Handling null source
         if np.isscalar(source_contribution):
             source = np.zeros_like(self.u_prev)
@@ -3377,24 +3367,31 @@ class PDESolver:
             u_nl = self.apply_nonlinear(self.u_prev)
             u_new = u_symb + u_nl + source
         else:
-            # General case with ETD1
-            u_nl = self.apply_nonlinear(self.u_prev)
+            if not self.is_spatial:
+                # General case with ETD1
+                u_nl = self.apply_nonlinear(self.u_prev)
     
-            # Calculation of exp(dt * L) and phi1(dt * L)
-            L_vals = self.combined_symbol  # Uses the updated symbol
-            exp_L = np.exp(-self.dt * L_vals)
-            phi1_L = (exp_L - 1.0) / (self.dt * L_vals)
-            phi1_L[np.isnan(phi1_L)] = 1.0  # Handling division by zero
+                # Calculation of exp(dt * L) and phi1(dt * L)
+                L_vals = self.combined_symbol  # Uses the updated symbol
+                exp_L = np.exp(-self.dt * L_vals)
+                phi1_L = (exp_L - 1.0) / (self.dt * L_vals)
+                phi1_L[np.isnan(phi1_L)] = 1.0  # Handling division by zero
     
-            # Fourier transform
-            u_hat = self.fft(self.u_prev)
-            u_nl_hat = self.fft(u_nl)
-            source_hat = self.fft(source)
+                # Fourier transform
+                u_hat = self.fft(self.u_prev)
+                u_nl_hat = self.fft(u_nl)
+                source_hat = self.fft(source)
     
-            # Assembling the solution in Fourier space
-            u_hat_new = exp_L * u_hat + self.dt * phi1_L * (u_nl_hat + source_hat)
-            u_new = self.ifft(u_hat_new)
-    
+                # Assembling the solution in Fourier space
+                u_hat_new = exp_L * u_hat + self.dt * phi1_L * (u_nl_hat + source_hat)
+                u_new = self.ifft(u_hat_new)
+            else:
+                # if the symbol depends on spatial variables : Euler method
+                # it works when the symbol is free of xi (and eta),
+                # otherwise the error becomes infinite....
+                Lu_prev = self.apply_psiOp(self.u_prev)
+                u_nl = self.apply_nonlinear(self.u_prev)
+                u_new = self.u_prev + self.dt * (Lu_prev + u_nl + source)
         # Applying boundary conditions
         self.apply_boundary(u_new)
         return u_new
@@ -6424,58 +6421,48 @@ if unsupported dimensions are detected, or invalid dependencies.</dd>
             return -self.kohn_nirenberg_nonperiodic(u_vals=u, x_grid=self.x_grid, xi_grid=self.kx, symbol_func=symbol_func)
         else:
             return -self.kohn_nirenberg_nonperiodic(u_vals=u, x_grid=(self.x_grid, self.y_grid), xi_grid=(self.kx, self.ky), symbol_func=symbol_func)
-    
-    
+     
     def step_order1_with_psi(self, source_contribution):
         &#34;&#34;&#34;
-        Advance the solution by one time step for first-order PDEs with pseudo-differential operators (ψOp).
+        Perform one time step of a first-order evolution using a pseudo-differential operator.
     
-        This method integrates the solution forward in time using an exponential integrator scheme.
-        It supports both periodic boundary conditions with direct Fourier space evolution,
-        and general spatially varying symbols using ETD1 (Exponential Time Differencing of order 1).
+        This method updates the solution field using an exponential integrator or explicit Euler scheme,
+        depending on boundary conditions and the structure of the pseudo-differential symbol.
+        It supports:
+        - Linear dynamics via pseudo-differential operator L (possibly nonlocal)
+        - Nonlinear terms computed via spectral differentiation
+        - External source contributions
     
-        Algorithm:
-        ──────────
-        For periodic boundary conditions and constant-in-space symbols:
+        The update follows **three distinct computational paths**:
     
-            u_hat = FFT(uₙ)
-            u_hat ← exp(-Δt ⋅ L) ⋅ u_hat
-            u_symb = IFFT(u_hat)
-            u_new = u_symb + N(uₙ) + source
+        1. **Periodic boundaries + diagonalizable symbol**  
+           Symbol is constant in space → use direct Fourier-based exponential integrator:  
+               uₙ₊₁ = e⁻ᴸΔᵗ ⋅ uₙ + Δt ⋅ φ₁(−LΔt) ⋅ (N(uₙ) + F)
     
-        For non-periodic or spatially varying symbols (ETD1):
+        2. **Non-diagonalizable but spatially uniform symbol**  
+           General exponential time differencing of order 1:  
+               uₙ₊₁ = eᴸΔᵗ ⋅ uₙ + Δt ⋅ φ₁(LΔt) ⋅ (N(uₙ) + F)
     
-            L = combined symbol from ψOp
-            exp_L = exp(-Δt ⋅ L)
-            phi1_L = (exp_L - 1) / (-Δt ⋅ L), with limit handling
-            u_hat_new = exp_L ⋅ FFT(uₙ) + Δt ⋅ phi1_L ⋅ (FFT(N(uₙ)) + FFT(source))
-            u_new = IFFT(u_hat_new)
+        3. **Spatially varying symbol**  
+           No frequency diagonalization available → use explicit Euler:  
+               uₙ₊₁ = uₙ + Δt ⋅ (L(uₙ) + N(uₙ) + F)
     
         where:
-            uₙ      = current solution
-            N(uₙ)   = nonlinear terms evaluated at uₙ
-            L       = linear operator (from ψOp)
-            Δt      = time step size
+            L(uₙ) = linear part via pseudo-differential operator
+            N(uₙ) = nonlinear contribution at current time step
+            F     = external source term
+            Δt    = time step size
+            φ₁(z) = (eᶻ − 1)/z (with safe handling near z=0)
     
-        Parameters:
-        ────────────
-        source_contribution : float or np.ndarray
-            External source term to be added during the update. If scalar, a zero-filled array matching
-            the shape of self.u_prev is created.
+        Boundary conditions are applied after each update to ensure consistency.
+    
+        Args:
+            source_contribution (np.ndarray): Array representing the external source term at current time step.
+                                              Must match the spatial dimensions of self.u_prev.
     
         Returns:
-        ─────────
-        u_new : np.ndarray
-            The updated solution after one time step.
-    
-        Notes:
-        ──────
-        - Recomputes the symbol if it depends on spatial variables (self.is_spatial).
-        - Applies dealiasing mask in Fourier space to avoid aliasing errors.
-        - Supports both 1D and 2D configurations seamlessly.
-        - Handles division-by-zero in phi1_L safely via np.isnan replacement.
+            np.ndarray: Updated solution array after one time step.
         &#34;&#34;&#34;
-
         # Handling null source
         if np.isscalar(source_contribution):
             source = np.zeros_like(self.u_prev)
@@ -6495,24 +6482,31 @@ if unsupported dimensions are detected, or invalid dependencies.</dd>
             u_nl = self.apply_nonlinear(self.u_prev)
             u_new = u_symb + u_nl + source
         else:
-            # General case with ETD1
-            u_nl = self.apply_nonlinear(self.u_prev)
+            if not self.is_spatial:
+                # General case with ETD1
+                u_nl = self.apply_nonlinear(self.u_prev)
     
-            # Calculation of exp(dt * L) and phi1(dt * L)
-            L_vals = self.combined_symbol  # Uses the updated symbol
-            exp_L = np.exp(-self.dt * L_vals)
-            phi1_L = (exp_L - 1.0) / (self.dt * L_vals)
-            phi1_L[np.isnan(phi1_L)] = 1.0  # Handling division by zero
+                # Calculation of exp(dt * L) and phi1(dt * L)
+                L_vals = self.combined_symbol  # Uses the updated symbol
+                exp_L = np.exp(-self.dt * L_vals)
+                phi1_L = (exp_L - 1.0) / (self.dt * L_vals)
+                phi1_L[np.isnan(phi1_L)] = 1.0  # Handling division by zero
     
-            # Fourier transform
-            u_hat = self.fft(self.u_prev)
-            u_nl_hat = self.fft(u_nl)
-            source_hat = self.fft(source)
+                # Fourier transform
+                u_hat = self.fft(self.u_prev)
+                u_nl_hat = self.fft(u_nl)
+                source_hat = self.fft(source)
     
-            # Assembling the solution in Fourier space
-            u_hat_new = exp_L * u_hat + self.dt * phi1_L * (u_nl_hat + source_hat)
-            u_new = self.ifft(u_hat_new)
-    
+                # Assembling the solution in Fourier space
+                u_hat_new = exp_L * u_hat + self.dt * phi1_L * (u_nl_hat + source_hat)
+                u_new = self.ifft(u_hat_new)
+            else:
+                # if the symbol depends on spatial variables : Euler method
+                # it works when the symbol is free of xi (and eta),
+                # otherwise the error becomes infinite....
+                Lu_prev = self.apply_psiOp(self.u_prev)
+                u_nl = self.apply_nonlinear(self.u_prev)
+                u_new = self.u_prev + self.dt * (Lu_prev + u_nl + source)
         # Applying boundary conditions
         self.apply_boundary(u_new)
         return u_new
@@ -11852,103 +11846,96 @@ v (np.ndarray): Current time derivative of the solution (∂ₜu) in real space.
 <span>def <span class="ident">step_order1_with_psi</span></span>(<span>self, source_contribution)</span>
 </code></dt>
 <dd>
-<div class="desc"><p>Advance the solution by one time step for first-order PDEs with pseudo-differential operators (ψOp).</p>
-<p>This method integrates the solution forward in time using an exponential integrator scheme.
-It supports both periodic boundary conditions with direct Fourier space evolution,
-and general spatially varying symbols using ETD1 (Exponential Time Differencing of order 1).</p>
-<p>Algorithm:
-──────────
-For periodic boundary conditions and constant-in-space symbols:</p>
-<pre><code>u_hat = FFT(uₙ)
-u_hat ← exp(-Δt ⋅ L) ⋅ u_hat
-u_symb = IFFT(u_hat)
-u_new = u_symb + N(uₙ) + source
-</code></pre>
-<p>For non-periodic or spatially varying symbols (ETD1):</p>
-<pre><code>L = combined symbol from ψOp
-exp_L = exp(-Δt ⋅ L)
-phi1_L = (exp_L - 1) / (-Δt ⋅ L), with limit handling
-u_hat_new = exp_L ⋅ FFT(uₙ) + Δt ⋅ phi1_L ⋅ (FFT(N(uₙ)) + FFT(source))
-u_new = IFFT(u_hat_new)
-</code></pre>
+<div class="desc"><p>Perform one time step of a first-order evolution using a pseudo-differential operator.</p>
+<p>This method updates the solution field using an exponential integrator or explicit Euler scheme,
+depending on boundary conditions and the structure of the pseudo-differential symbol.
+It supports:
+- Linear dynamics via pseudo-differential operator L (possibly nonlocal)
+- Nonlinear terms computed via spectral differentiation
+- External source contributions</p>
+<p>The update follows <strong>three distinct computational paths</strong>:</p>
+<ol>
+<li>
+<p><strong>Periodic boundaries + diagonalizable symbol</strong><br>
+Symbol is constant in space → use direct Fourier-based exponential integrator:<br>
+uₙ₊₁ = e⁻ᴸΔᵗ ⋅ uₙ + Δt ⋅ φ₁(−LΔt) ⋅ (N(uₙ) + F)</p>
+</li>
+<li>
+<p><strong>Non-diagonalizable but spatially uniform symbol</strong><br>
+General exponential time differencing of order 1:<br>
+uₙ₊₁ = eᴸΔᵗ ⋅ uₙ + Δt ⋅ φ₁(LΔt) ⋅ (N(uₙ) + F)</p>
+</li>
+<li>
+<p><strong>Spatially varying symbol</strong><br>
+No frequency diagonalization available → use explicit Euler:<br>
+uₙ₊₁ = uₙ + Δt ⋅ (L(uₙ) + N(uₙ) + F)</p>
+</li>
+</ol>
 <p>where:
-uₙ
-= current solution
-N(uₙ)
-= nonlinear terms evaluated at uₙ
-L
-= linear operator (from ψOp)
+L(uₙ) = linear part via pseudo-differential operator
+N(uₙ) = nonlinear contribution at current time step
+F
+= external source term
 Δt
-= time step size</p>
-<p>Parameters:
-────────────
-source_contribution : float or np.ndarray
-External source term to be added during the update. If scalar, a zero-filled array matching
-the shape of self.u_prev is created.</p>
-<p>Returns:
-─────────
-u_new : np.ndarray
-The updated solution after one time step.</p>
-<p>Notes:
-──────
-- Recomputes the symbol if it depends on spatial variables (self.is_spatial).
-- Applies dealiasing mask in Fourier space to avoid aliasing errors.
-- Supports both 1D and 2D configurations seamlessly.
-- Handles division-by-zero in phi1_L safely via np.isnan replacement.</p></div>
+= time step size
+φ₁(z) = (eᶻ − 1)/z (with safe handling near z=0)</p>
+<p>Boundary conditions are applied after each update to ensure consistency.</p>
+<h2 id="args">Args</h2>
+<dl>
+<dt><strong><code>source_contribution</code></strong> :&ensp;<code>np.ndarray</code></dt>
+<dd>Array representing the external source term at current time step.
+Must match the spatial dimensions of self.u_prev.</dd>
+</dl>
+<h2 id="returns">Returns</h2>
+<dl>
+<dt><code>np.ndarray</code></dt>
+<dd>Updated solution array after one time step.</dd>
+</dl></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
 <pre><code class="python">def step_order1_with_psi(self, source_contribution):
     &#34;&#34;&#34;
-    Advance the solution by one time step for first-order PDEs with pseudo-differential operators (ψOp).
+    Perform one time step of a first-order evolution using a pseudo-differential operator.
 
-    This method integrates the solution forward in time using an exponential integrator scheme.
-    It supports both periodic boundary conditions with direct Fourier space evolution,
-    and general spatially varying symbols using ETD1 (Exponential Time Differencing of order 1).
+    This method updates the solution field using an exponential integrator or explicit Euler scheme,
+    depending on boundary conditions and the structure of the pseudo-differential symbol.
+    It supports:
+    - Linear dynamics via pseudo-differential operator L (possibly nonlocal)
+    - Nonlinear terms computed via spectral differentiation
+    - External source contributions
 
-    Algorithm:
-    ──────────
-    For periodic boundary conditions and constant-in-space symbols:
+    The update follows **three distinct computational paths**:
 
-        u_hat = FFT(uₙ)
-        u_hat ← exp(-Δt ⋅ L) ⋅ u_hat
-        u_symb = IFFT(u_hat)
-        u_new = u_symb + N(uₙ) + source
+    1. **Periodic boundaries + diagonalizable symbol**  
+       Symbol is constant in space → use direct Fourier-based exponential integrator:  
+           uₙ₊₁ = e⁻ᴸΔᵗ ⋅ uₙ + Δt ⋅ φ₁(−LΔt) ⋅ (N(uₙ) + F)
 
-    For non-periodic or spatially varying symbols (ETD1):
+    2. **Non-diagonalizable but spatially uniform symbol**  
+       General exponential time differencing of order 1:  
+           uₙ₊₁ = eᴸΔᵗ ⋅ uₙ + Δt ⋅ φ₁(LΔt) ⋅ (N(uₙ) + F)
 
-        L = combined symbol from ψOp
-        exp_L = exp(-Δt ⋅ L)
-        phi1_L = (exp_L - 1) / (-Δt ⋅ L), with limit handling
-        u_hat_new = exp_L ⋅ FFT(uₙ) + Δt ⋅ phi1_L ⋅ (FFT(N(uₙ)) + FFT(source))
-        u_new = IFFT(u_hat_new)
+    3. **Spatially varying symbol**  
+       No frequency diagonalization available → use explicit Euler:  
+           uₙ₊₁ = uₙ + Δt ⋅ (L(uₙ) + N(uₙ) + F)
 
     where:
-        uₙ      = current solution
-        N(uₙ)   = nonlinear terms evaluated at uₙ
-        L       = linear operator (from ψOp)
-        Δt      = time step size
+        L(uₙ) = linear part via pseudo-differential operator
+        N(uₙ) = nonlinear contribution at current time step
+        F     = external source term
+        Δt    = time step size
+        φ₁(z) = (eᶻ − 1)/z (with safe handling near z=0)
 
-    Parameters:
-    ────────────
-    source_contribution : float or np.ndarray
-        External source term to be added during the update. If scalar, a zero-filled array matching
-        the shape of self.u_prev is created.
+    Boundary conditions are applied after each update to ensure consistency.
+
+    Args:
+        source_contribution (np.ndarray): Array representing the external source term at current time step.
+                                          Must match the spatial dimensions of self.u_prev.
 
     Returns:
-    ─────────
-    u_new : np.ndarray
-        The updated solution after one time step.
-
-    Notes:
-    ──────
-    - Recomputes the symbol if it depends on spatial variables (self.is_spatial).
-    - Applies dealiasing mask in Fourier space to avoid aliasing errors.
-    - Supports both 1D and 2D configurations seamlessly.
-    - Handles division-by-zero in phi1_L safely via np.isnan replacement.
+        np.ndarray: Updated solution array after one time step.
     &#34;&#34;&#34;
-
     # Handling null source
     if np.isscalar(source_contribution):
         source = np.zeros_like(self.u_prev)
@@ -11968,24 +11955,31 @@ The updated solution after one time step.</p>
         u_nl = self.apply_nonlinear(self.u_prev)
         u_new = u_symb + u_nl + source
     else:
-        # General case with ETD1
-        u_nl = self.apply_nonlinear(self.u_prev)
+        if not self.is_spatial:
+            # General case with ETD1
+            u_nl = self.apply_nonlinear(self.u_prev)
 
-        # Calculation of exp(dt * L) and phi1(dt * L)
-        L_vals = self.combined_symbol  # Uses the updated symbol
-        exp_L = np.exp(-self.dt * L_vals)
-        phi1_L = (exp_L - 1.0) / (self.dt * L_vals)
-        phi1_L[np.isnan(phi1_L)] = 1.0  # Handling division by zero
+            # Calculation of exp(dt * L) and phi1(dt * L)
+            L_vals = self.combined_symbol  # Uses the updated symbol
+            exp_L = np.exp(-self.dt * L_vals)
+            phi1_L = (exp_L - 1.0) / (self.dt * L_vals)
+            phi1_L[np.isnan(phi1_L)] = 1.0  # Handling division by zero
 
-        # Fourier transform
-        u_hat = self.fft(self.u_prev)
-        u_nl_hat = self.fft(u_nl)
-        source_hat = self.fft(source)
+            # Fourier transform
+            u_hat = self.fft(self.u_prev)
+            u_nl_hat = self.fft(u_nl)
+            source_hat = self.fft(source)
 
-        # Assembling the solution in Fourier space
-        u_hat_new = exp_L * u_hat + self.dt * phi1_L * (u_nl_hat + source_hat)
-        u_new = self.ifft(u_hat_new)
-
+            # Assembling the solution in Fourier space
+            u_hat_new = exp_L * u_hat + self.dt * phi1_L * (u_nl_hat + source_hat)
+            u_new = self.ifft(u_hat_new)
+        else:
+            # if the symbol depends on spatial variables : Euler method
+            # it works when the symbol is free of xi (and eta),
+            # otherwise the error becomes infinite....
+            Lu_prev = self.apply_psiOp(self.u_prev)
+            u_nl = self.apply_nonlinear(self.u_prev)
+            u_new = self.u_prev + self.dt * (Lu_prev + u_nl + source)
     # Applying boundary conditions
     self.apply_boundary(u_new)
     return u_new</code></pre>
