@@ -84,17 +84,17 @@ pip install numpy scipy matplotlib sympy ipywidgets
 ## ⚡ Quick Start
 
 ```python
-from sympy import symbols, Function, Eq, diff
-from PDESolver_38 import PDESolver
-import numpy as np
+from PDESolver import *
 
 # Define PDE
-t, x = symbols('t x')
-u = Function('u')(t, x)
-equation = Eq(diff(u, t, t), diff(u, x, 2) - u)
+t, x, xi = symbols('t x xi', real=True)
+u = Function('u')
+
+#equation = Eq(diff(u, t, t), diff(u, x, 2) - u) # boundary_condition : 'periodic'
+equation = Eq(diff(u(t,x), t), -psiOp(xi**2 + 1, u(t,x))) # boundary_condition : 'periodic' or 'dirichlet'
 
 # Init solver
-solver = PDESolver(equation, time_scheme='LeapFrog')
+solver = PDESolver(equation)
 
 # Setup domain
 solver.setup(
@@ -102,12 +102,12 @@ solver.setup(
     Lt=2.0, Nt=1000,
     initial_condition=lambda x: np.sin(x),
     initial_velocity=lambda x: 0*x,
-    boundary='dirichlet'  # or 'periodic'
+    boundary_condition='periodic' # or 'dirichlet'
 )
 
 # Solve & animate
 solver.solve()
-solver.animate(component='real')
+ani = solver.animate(component='real')
 HTML(ani.to_jshtml())
 ```
 
