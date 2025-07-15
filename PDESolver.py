@@ -2982,7 +2982,7 @@ class PDESolver:
                 if term.has(Derivative):
                     for deriv in term.atoms(Derivative):
                         if deriv.args[1][0] == self.x:
-                            term_replaced = term_replaced.subs(deriv, symbols('u_x'))
+                            term_replaced = term_replaced.subs(deriv, symbols('u_x'))            
                 term_func = lambdify((self.t, self.x, self.u, 'u_x'), term_replaced, 'numpy')
                 if is_v:
                     nonlinear_term += term_func(0, self.X, self.v_prev, u_x)

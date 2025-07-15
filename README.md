@@ -1,81 +1,79 @@
-# PDESolver: A Python Framework for Solving Partial Differential Equations
+# 🧮 PDESolver: A Symbolic & Spectral Python Framework for PDEs
 
 ![Test Notebooks](https://github.com/phbillet/pdesolver/actions/workflows/test-notebooks.yml/badge.svg)
-
 [![codecov](https://codecov.io/gh/phbillet/pdesolver/branch/master/graph/badge.svg)](https://codecov.io/gh/phbillet/pdesolver)
 
+---
 
-## Overview
+## ✨ Overview
 
-`PDESolver` is a modular Python framework for the numerical solution and analysis of partial differential equations (PDEs) in 1D and 2D. It combines symbolic parsing, pseudo-spectral methods, and support for custom pseudo-differential operators. The framework enables advanced wave analysis, ellipticity diagnostics, and interactive visualizations for symbolic operators.
+**PDESolver** is a symbolic and spectral Python framework for solving **partial differential equations (PDEs)** in 1D and 2D.  
+It supports:
+
+- Time-dependent (1st and 2nd order) **and stationary** PDEs,
+- Periodic and **Dirichlet boundary conditions**,
+- Fully symbolic **pseudo-differential operators** via `psiOp(...)`,
+- Advanced **microlocal analysis** and Hamiltonian flow simulation.
 
 ---
 
-## Key Features
+## 🚀 Key Features
 
-* **Symbolic Equation Parsing**
+### 📌 Symbolic PDE Parsing
+- Accepts `sympy` equations with arbitrary structure.
+- Separates linear, nonlinear, source, `Op(...)`, and `psiOp(...)` terms.
+- Supports nonlocal, variable-coefficient and fractional operators.
 
-  * Automatically separates linear, nonlinear, symbolic operator (`Op`), pseudo-differential (`psiOp`), and source terms.
-  * Supports both standard derivatives and custom pseudo-differential forms via `Op(expr, u)` or `psiOp(expr, u)`.
+### 🧠 Pseudo-Differential Operators
+- 1D & 2D support via `PseudoDifferentialOperator` class.
+- Symbol mode: manual symbolic definition.
+- Auto mode: symbolic derivation from differential expressions.
+- Asymptotic tools: principal symbol, order, adjoints, inverse composition.
 
-* **Pseudo-Differential Operators**
+### 🧮 Spatial Discretization
+- Spectral methods via FFT/IFFT.
+- Automatic handling of:
+  - Periodic boundary conditions.
+  - Dirichlet conditions via sine transforms.
+- Optional **dealiasing** (e.g. 2/3 rule).
 
-  * Define fractional, nonlocal, or space-dependent operators in Fourier space.
-  * Symbol evaluation in either direct symbolic mode (`symbol`) or automatic extraction mode (`auto`).
-  * Numerical symbol evaluation and visualization via the `PseudoDifferentialOperator` class (1D and 2D).
+### ⏱ Time Integration Schemes
+- **First-order** and **second-order** time-dependent PDEs.
+- **Stationary PDEs** handled automatically (symbolic inversion if elliptic).
+- Built-in schemes:
+  - Exponential stepping (default for `psiOp`)
+  - ETD-RK4 (1st & 2nd order)
+  - Leap-Frog (energy-conserving)
 
-* **Spectral Discretization**
+### 🧭 Microlocal & Spectral Analysis
+- 📈 Wavefront Set tracking
+- 🔬 Symbol amplitude & phase plots
+- 🎯 Characteristic & micro-support sets
+- 🌀 Hamiltonian & symplectic flow visualization
+- 📡 Group velocity fields
 
-  * Uses FFT and IFFT for spatial derivatives.
-  * Built-in dealiasing using configurable frequency cutoffs.
+### 🔍 Ellipticity & Inversion
+- Automatic symbolic inversion via **asymptotic right inverse**.
+- Symbolic order analysis & homogeneity checks.
+- Numerical ellipticity tests on grid.
 
-* **Temporal Integration**
+### 📉 Energy Monitoring
+- Total energy for second-order systems (optional log-scale).
+- Auto-conservation check with Leap-Frog or self-adjoint operators.
 
-  * Supports first- and second-order in time equations.
-  * Multiple time schemes: exponential time stepping, ETD-RK4 (1st and 2nd order), and Leap-Frog integration.
-  * Stationary PDEs (no time variable) are automatically detected and treated accordingly.
-
-* **Visualization and Microlocal Analysis**
-
-  * **Wavefront Set**: Visualize how singularities propagate across space and frequency.
-  * **Cotangent Fiber**: Inspect symbol magnitude at fixed spatial locations.
-  * **Symbol Amplitude / Phase**: View maps of operator behavior across the domain.
-  * **Characteristic Set**: Identify vanishing zones of the symbol.
-  * **Micro-Support & Hamiltonian Flow**: Track propagation of microlocal energy.
-  * **Symplectic Vector Field & Group Velocity**: Analyze symbol-induced flows in phase space.
-
-* **Wave Propagation Tools**
-
-  * Compute dispersion relation, phase and group velocity.
-  * Full anisotropy support in 2D systems.
-  * Symbol quantization in Kohn–Nirenberg form for variable coefficients.
-
-* **Stationary Solvers and Ellipticity Checks**
-
-  * Automatic symbolic inversion via right asymptotic inverse when applicable.
-  * Numerical ellipticity testing for `psiOp` symbols on grid.
-
-* **Energy Monitoring**
-
-  * Computes total system energy (especially for second-order systems).
-  * Supports linear and logarithmic scale energy plots.
-
-* **Animation and Solution Visualization**
-
-  * Create time-evolving animations for 1D (line) and 2D (surface) solutions.
-  * Interactive symbol analysis widgets for symbol inspection.
-  * Options for overlaying phase fronts, wavefront tracking, and singularities.
+### 🎞 Animation & Widgets
+- Animated solution visualizations (1D/2D).
+- Interactive `ipywidgets` for symbol inspection.
+- Phase front overlay & singularity tracking.
 
 ---
 
-## Installation
+## 📦 Installation
 
-### Prerequisites
+### Requirements
 
-* Python 3.8 or higher
-* Required libraries: `numpy`, `scipy`, `matplotlib`, `sympy`, `ipywidgets`
-
-### Installing Dependencies
+- Python ≥ 3.8
+- `numpy`, `scipy`, `matplotlib`, `sympy`, `ipywidgets`
 
 ```bash
 pip install numpy scipy matplotlib sympy ipywidgets
@@ -83,83 +81,66 @@ pip install numpy scipy matplotlib sympy ipywidgets
 
 ---
 
-## Quick Start
-
-1. **Define a PDE** using SymPy:
+## ⚡ Quick Start
 
 ```python
 from sympy import symbols, Function, Eq, diff
-from PDESolver_33 import PDESolver
+from PDESolver_38 import PDESolver
 import numpy as np
 
+# Define PDE
 t, x = symbols('t x')
 u = Function('u')(t, x)
-equation = Eq(diff(u, t), diff(u, x, 2) + u**2)
-```
+equation = Eq(diff(u, t, t), diff(u, x, 2) - u)
 
-2. **Initialize the Solver**:
+# Init solver
+solver = PDESolver(equation, time_scheme='LeapFrog')
 
-```python
-solver = PDESolver(equation, time_scheme='ETD-RK4', dealiasing_ratio=2/3)
-```
-
-3. **Setup Domain and Initial Conditions**:
-
-```python
-def initial_condition(x):
-    return np.sin(x)
-
+# Setup domain
 solver.setup(
-    Lx=2 * np.pi, Nx=128,
-    Lt=1.0, Nt=1000,
-    initial_condition=initial_condition
+    Lx=2*np.pi, Nx=256,
+    Lt=2.0, Nt=1000,
+    initial_condition=lambda x: np.sin(x),
+    initial_velocity=lambda x: 0*x,
+    boundary='dirichlet'  # or 'periodic'
 )
-```
 
-4. **Solve and Animate**:
-
-```python
+# Solve & animate
 solver.solve()
-ani = solver.animate(component='real')
+solver.animate(component='real')
+HTML(ani.to_jshtml())
 ```
 
 ---
 
-## Jupyter Notebooks for Testing
+## 🧪 Test Notebooks
 
-Several Jupyter notebooks are provided to test and demonstrate the capabilities of the solver:
+| Notebook                               | Description                                                        |
+|----------------------------------------|--------------------------------------------------------------------|
+| `PDE_symbolic_tester.ipynb`            | Verifies symbolic parsing & solutions                              |
+| `PDESolver_psiOp_tester.ipynb`         | Tests `psiOp` visualization & symbolic analysis                    |
+| `PDESolver_tester_1D_periodic.ipynb`   | 1D periodic PDEs: heat, wave, fractional Laplacian, etc.           |
+| `PDESolver_tester_1D_Dirichlet.ipynb`  | 1D Dirichlet: Schrödinger, Airy, Hermite, Legendre, etc.           |
+| `PDESolver_tester_2D_periodic.ipynb`   | 2D periodic PDEs: wave, Klein–Gordon, diffusion, etc.              |
+| `PDESolver_tester_2D_Dirichlet.ipynb`  | 2D Dirichlet examples: Laplace, Helmholtz, Schrödinger             |
 
-* `PDE_symbolic_tester.ipynb`: Verifies the correctness of exact solutions for 1D and 2D symbolic PDEs.
-* `PDESolver_psiOp_tester.ipynb`: Tests the features of the PseudoDifferentialOperator class, including symbol evaluation and visualization.
-* `PDESolver_tester_1D_periodic.ipynb`: Exercises the PDESolver class on various 1D PDEs such as the heat equation, wave equation, and equations with nonlocal or fractional operators in periodic conditions.
-* `PDESolver_tester_1D_Dirichlet.ipynb`: Exercises the PDESolver class on various 1D PDEs such as the heat, wave, Schrödinger, Airy, Hermite and Legendre equations  in Dirichlet conditions.
-* `PDESolver_tester_2D_periodic.ipynb`: Tests the PDESolver class on 2D PDEs including the heat equation, wave equation, and the Klein–Gordon equation in periodic conditions.
-* `PDESolver_tester_2D_Dirichlet.ipynb`: Tests the PDESolver class on 2D PDEs including some equations in Dirichlet conditions.
-
-These notebooks serve both as validation tools and as usage examples. They are ideal entry points for new users wishing to understand the solver's capabilities.
-
----
-
-## Contributing
-
-Contributions are welcome! Please fork the repository, create a feature branch, and submit a pull request with a clear description of your changes.
+Use them to explore features and validate new equations.
 
 ---
 
-## License
+## 🤝 Contributing
 
-PDESolver is distributed under the [Apache License 2.0](https://www.apache.org/licenses/LICENSE-2.0).
-
-You are free to use, modify, and redistribute this software under the terms of this license. Redistributions must include appropriate copyright.
-
-### Author Attribution
-
-If you use PDESolver in your project or derivative work, please retain the original author attribution:
-
-**Philippe Billet (2025)**
+Pull requests welcome! Fork the repo, make a feature branch, and submit with a clear description.
 
 ---
 
-## Acknowledgments
+## 📜 License
 
-This project was built with the assistance of advanced language models, which played a key role in generating and structuring code and documentation. Thanks to **ChatGPT**, **Qwen**, **DeepSeek**, **Claude**, and **Mistral** for their contributions to automated reasoning and documentation synthesis.
+**Apache License 2.0**  
+© 2025 [Philippe Billet](https://github.com/phbillet)
+
+---
+
+## 🙏 Acknowledgments
+
+This project is made possible thanks to symbolic automation and research support from models like **ChatGPT**, **Qwen**, **Claude**, and **Mistral**.

@@ -3059,7 +3059,7 @@ class PDESolver:
                 if term.has(Derivative):
                     for deriv in term.atoms(Derivative):
                         if deriv.args[1][0] == self.x:
-                            term_replaced = term_replaced.subs(deriv, symbols(&#39;u_x&#39;))
+                            term_replaced = term_replaced.subs(deriv, symbols(&#39;u_x&#39;))            
                 term_func = lambdify((self.t, self.x, self.u, &#39;u_x&#39;), term_replaced, &#39;numpy&#39;)
                 if is_v:
                     nonlinear_term += term_func(0, self.X, self.v_prev, u_x)
@@ -6174,7 +6174,7 @@ if unsupported dimensions are detected, or invalid dependencies.</dd>
                 if term.has(Derivative):
                     for deriv in term.atoms(Derivative):
                         if deriv.args[1][0] == self.x:
-                            term_replaced = term_replaced.subs(deriv, symbols(&#39;u_x&#39;))
+                            term_replaced = term_replaced.subs(deriv, symbols(&#39;u_x&#39;))            
                 term_func = lambdify((self.t, self.x, self.u, &#39;u_x&#39;), term_replaced, &#39;numpy&#39;)
                 if is_v:
                     nonlinear_term += term_func(0, self.X, self.v_prev, u_x)
@@ -8564,7 +8564,7 @@ is_v (bool): If True, evaluates nonlinear terms for the velocity field v instead
             if term.has(Derivative):
                 for deriv in term.atoms(Derivative):
                     if deriv.args[1][0] == self.x:
-                        term_replaced = term_replaced.subs(deriv, symbols(&#39;u_x&#39;))
+                        term_replaced = term_replaced.subs(deriv, symbols(&#39;u_x&#39;))            
             term_func = lambdify((self.t, self.x, self.u, &#39;u_x&#39;), term_replaced, &#39;numpy&#39;)
             if is_v:
                 nonlinear_term += term_func(0, self.X, self.v_prev, u_x)
