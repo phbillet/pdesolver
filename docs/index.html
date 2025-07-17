@@ -24,53 +24,198 @@
 <section id="section-intro">
 <p>PDESolver — A Spectral Method PDE Solver with Symbolic Capabilities</p>
 <h2 id="overview">Overview</h2>
-<p>This module provides a flexible and symbolic-based solver for partial differential equations (PDEs)
-using spectral methods. It supports:
-- 1D and 2D problems
-- First- and second-order time evolution
-- Linear and nonlinear PDEs
-- Symbolic parsing via SymPy
-- Exponential time integration and ETD-RK4 schemes
-- Advanced pseudo-differential operator analysis
-- Interactive visualization using IPython widgets</p>
-<h2 id="symbolic-workflow">Symbolic Workflow</h2>
-<p>The solver accepts PDEs defined symbolically using SymPy syntax. For example:</p>
-<pre><code class="language-python-repl">&gt;&gt;&gt; from sympy import Function, diff, Eq
-&gt;&gt;&gt; u = Function('u')
-&gt;&gt;&gt; t, x = symbols('t x')
-&gt;&gt;&gt; eq = Eq(diff(u(t,x), t), diff(u(t,x), x, 2) + u(t,x)**2)
-</code></pre>
-<p>It automatically extracts:
-- The linear operator L(k)
-- Dispersion relation ω(k)
-- Nonlinear terms
-- Pseudo-differential operators (psiOp)</p>
-<h2 id="numerical-methods">Numerical Methods</h2>
+<p>PDESolver is a powerful Python module for solving partial differential equations (PDEs)
+using spectral methods, enhanced with symbolic capabilities via SymPy. It combines high-precision
+numerical methods with symbolic analysis of differential and pseudo-differential operators,
+making it suitable for both research and educational applications.</p>
+<h2 id="key-features">Key Features</h2>
 <ul>
-<li>Fourier-based spectral differentiation</li>
-<li>Dealiasing for nonlinear terms</li>
-<li>Temporal integrators:<ul>
-<li>Default exponential stepping</li>
-<li>ETD-RK4 (Exponential Time Differencing Runge-Kutta of 4th order)</li>
+<li><strong>Symbolic Parsing</strong>: Define PDEs using SymPy expressions for full symbolic manipulation
+</li>
+<li><strong>Spectral Methods</strong>: Uses Fourier transforms for high-accuracy spatial differentiation
+</li>
+<li><strong>Nonlinear Support</strong>: Handles nonlinear terms via pseudo-spectral evaluation and dealiasing
+</li>
+<li><strong>Time Integration</strong>:
+<ul>
+<li>Exponential time stepping for linear systems</li>
+<li>ETD-RK4 (Exponential Time Differencing with 4th-order Runge-Kutta) for stiff or nonlinear systems
+</li>
+</ul>
+</li>
+<li><strong>Pseudo-Differential Operators (<code><a title="PDESolver.psiOp" href="#PDESolver.psiOp">psiOp</a></code>)</strong>:
+<ul>
+<li>Define equations using <code><a title="PDESolver.psiOp" href="#PDESolver.psiOp">psiOp</a>(symbol, u)</code> for arbitrary pseudo-differential symbols
+</li>
+<li>Supports symbolic inversion, adjoint computation, and asymptotic expansions
+</li>
+</ul>
+</li>
+<li><strong>Boundary Conditions</strong>:
+<ul>
+<li>Periodic (via FFT)</li>
+<li>Dirichlet (via pseudo-differential operator inversion)
+</li>
+</ul>
+</li>
+<li><strong>Interactive Analysis</strong>:
+<ul>
+<li>Explore symbol properties (<code>|p(x, ξ)|</code>, group velocity, wavefront sets)
+</li>
+<li>Visualize Hamiltonian flows and characteristic sets
+</li>
+</ul>
+</li>
+<li><strong>Visualization</strong>:
+<ul>
+<li>Animate solutions in 1D/2D
+</li>
+<li>Plot real, imaginary, absolute, or phase components of complex solutions</li>
 </ul>
 </li>
 </ul>
-<h2 id="interactive-analysis">Interactive Analysis</h2>
-<p>Use <code>interactive_symbol_analysis(pseudo_op)</code> to explore:
-- Group velocity fields
-- Symbol amplitude/phase
-- Hamiltonian flows
-- Characteristic sets
-- Wavefront propagation</p>
-<h2 id="example-usage">Example Usage</h2>
-<pre><code class="language-python-repl">&gt;&gt;&gt; from sympy import sin, pi
-&gt;&gt;&gt; def initial(x): return sin(2 * pi * x)
-&gt;&gt;&gt; solver = PDESolver(eq)
-&gt;&gt;&gt; solver.setup(Lx=1.0, Nx=256, Lt=1.0, Nt=1000, initial_condition=initial)
-&gt;&gt;&gt; solver.solve()
-&gt;&gt;&gt; ani = solver.animate()
-&gt;&gt;&gt; HTML(ani.to_jshtml())
+<h2 id="symbolic-workflow">Symbolic Workflow</h2>
+<p>PDESolver supports full symbolic definition of PDEs using SymPy syntax. It automatically extracts and analyzes:</p>
+<ul>
+<li>Linear operators in frequency space <code>L(k)</code></li>
+<li>Dispersion relations <code>ω(k)</code></li>
+<li>Nonlinear terms</li>
+<li>Pseudo-differential operators (<code><a title="PDESolver.psiOp" href="#PDESolver.psiOp">psiOp</a></code>)</li>
+<li>Source terms</li>
+</ul>
+<h2 id="example-definition">Example Definition</h2>
+<pre><code class="language-python">from PDESolver import *
+
+# Define PDE
+t, x, xi = symbols('t x xi', real=True)
+u = Function('u')
+
+#equation = Eq(diff(u, t, t), diff(u, x, 2) - u) # boundary_condition : 'periodic'
+equation = Eq(diff(u(t,x), t), -psiOp(xi**2 + 1, u(t,x))) # boundary_condition : 'periodic' or 'dirichlet'
+
+# Init solver
+solver = PDESolver(equation)
+
+# Setup domain
+solver.setup(
+    Lx=2*np.pi, Nx=256,
+    Lt=2.0, Nt=1000,
+    initial_condition=lambda x: np.sin(x),
+    initial_velocity=lambda x: 0*x,
+    boundary_condition='periodic' # or 'dirichlet'
+)
+
+# Solve &amp; animate
+solver.solve()
+ani = solver.animate(component='real')
+HTML(ani.to_jshtml())
 </code></pre>
+<h2 id="numerical-methods">Numerical Methods</h2>
+<h2 id="spectral-differentiation">Spectral Differentiation</h2>
+<ul>
+<li>Uses FFT-based spatial differentiation.</li>
+<li>Dealiasing is applied to nonlinear terms using a sharp cutoff.</li>
+<li>Handles 1D and 2D spatial domains.</li>
+</ul>
+<h2 id="time-integration">Time Integration</h2>
+<ul>
+<li>First-order evolution:</li>
+<li>Default exponential stepping.</li>
+<li>ETD-RK4 support for stiff or nonlinear systems.</li>
+<li>Second-order evolution:</li>
+<li>Leapfrog-style update.</li>
+<li>ETD-RK4 adapted for second-order systems.</li>
+<li>Supports acceleration from pseudo-differential operators.</li>
+</ul>
+<h2 id="pseudo-differential-operators">Pseudo-Differential Operators</h2>
+<ul>
+<li>Symbolic expressions like <code>xi**2 + 1</code> define the operator symbol.</li>
+<li>Evaluated using the Kohn–Nirenberg quantization.</li>
+<li>Supports non-periodic domains and Dirichlet boundary conditions through symbolic inversion.</li>
+</ul>
+<h2 id="interactive-symbol-analysis">Interactive Symbol Analysis</h2>
+<p>Use <code>interactive_symbol_analysis(pseudo_op)</code> to explore:</p>
+<ul>
+<li>Symbol amplitude and phase</li>
+<li>Group velocity fields</li>
+<li>Hamiltonian flows</li>
+<li>Wavefront sets</li>
+<li>Characteristic sets</li>
+<li>Micro-support estimates</li>
+</ul>
+<p>This is particularly useful for studying:</p>
+<ul>
+<li>Wave propagation</li>
+<li>Singularity propagation</li>
+<li>Stability and dispersion properties</li>
+<li>Microlocal behavior of solutions</li>
+</ul>
+<h2 id="example-use-case">Example Use Case</h2>
+<pre><code class="language-python">from PDESolver import *
+# Definition of symbols
+t, x, xi = symbols('t x xi', real=True)
+u = Function('u')
+
+# Evolution equation: ∂²u/∂t² = -ψOp(x² + ξ², u)
+p_expr = x**2 + xi**2
+equation = Eq(diff(u(t,x), t, t), -psiOp(p_expr, u(t,x)))
+
+# Creation of the solver
+solver = PDESolver(equation)
+
+# Parameters
+Lx = 12.0
+Nx = 256
+Lt = 3.0
+Nt = 600
+n = 2                     # Order of Hermite
+lambda_n = 2 * n + 1
+
+# Initial function: u₀(x) = Hₙ(x) * exp(-x² / 2)
+initial_condition = lambda x: eval_hermite(n, x) * np.exp(-x**2 / 2)
+
+# Zero initial velocity: ∂ₜ u(0,x) = 0
+initial_velocity = lambda x: 0.0 * x
+
+# Exact solution
+def u_exact(x, t):
+    return np.cos(np.sqrt(lambda_n) * t) * eval_hermite(n, x) * np.exp(-x**2 / 2)
+
+# Solver setup
+solver.setup(
+    Lx=Lx,
+    Nx=Nx,
+    Lt=Lt,
+    Nt=Nt,
+    boundary_condition='dirichlet',
+    initial_condition=initial_condition,
+    initial_velocity=initial_velocity,
+)
+
+# Solving
+solver.solve()
+
+# Validation tests
+n_test = 5
+for i in range(n_test + 1):
+    t_eval = i * Lt / n_test
+    solver.test(u_exact=u_exact, t_eval=t_eval, threshold=50, component='real')
+</code></pre>
+<h2 id="applications">Applications</h2>
+<p>PDESolver is ideal for:</p>
+<ul>
+<li>Educational tools (visualization of PDE solutions and symbolic analysis)</li>
+<li>Microlocal analysis (wavefront sets, Hamiltonian flows)</li>
+<li>Operator theory (pseudo-differential calculus, inversion, adjoints)</li>
+</ul>
+<h2 id="dependencies">Dependencies</h2>
+<ul>
+<li>numpy, scipy</li>
+<li>sympy for symbolic manipulation</li>
+<li>matplotlib for visualization</li>
+<li>ipywidgets for interactive analysis</li>
+<li>scipy.fft, scipy.integrate, scipy.signal</li>
+</ul>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -93,56 +238,183 @@ PDESolver — A Spectral Method PDE Solver with Symbolic Capabilities
 
 Overview
 --------
-This module provides a flexible and symbolic-based solver for partial differential equations (PDEs)
-using spectral methods. It supports:
-- 1D and 2D problems
-- First- and second-order time evolution
-- Linear and nonlinear PDEs
-- Symbolic parsing via SymPy
-- Exponential time integration and ETD-RK4 schemes
-- Advanced pseudo-differential operator analysis
-- Interactive visualization using IPython widgets
+PDESolver is a powerful Python module for solving partial differential equations (PDEs)
+using spectral methods, enhanced with symbolic capabilities via SymPy. It combines high-precision
+numerical methods with symbolic analysis of differential and pseudo-differential operators,
+making it suitable for both research and educational applications.
+
+Key Features
+------------
+- **Symbolic Parsing**: Define PDEs using SymPy expressions for full symbolic manipulation  
+- **Spectral Methods**: Uses Fourier transforms for high-accuracy spatial differentiation  
+- **Nonlinear Support**: Handles nonlinear terms via pseudo-spectral evaluation and dealiasing  
+- **Time Integration**:  
+    - Exponential time stepping for linear systems
+    - ETD-RK4 (Exponential Time Differencing with 4th-order Runge-Kutta) for stiff or nonlinear systems  
+- **Pseudo-Differential Operators (`psiOp`)**:  
+    - Define equations using `psiOp(symbol, u)` for arbitrary pseudo-differential symbols  
+    - Supports symbolic inversion, adjoint computation, and asymptotic expansions  
+- **Boundary Conditions**:  
+    - Periodic (via FFT)
+    - Dirichlet (via pseudo-differential operator inversion)  
+- **Interactive Analysis**:  
+    - Explore symbol properties (`|p(x, ξ)|`, group velocity, wavefront sets)  
+    - Visualize Hamiltonian flows and characteristic sets  
+- **Visualization**:  
+    - Animate solutions in 1D/2D  
+    - Plot real, imaginary, absolute, or phase components of complex solutions
 
 Symbolic Workflow
 -----------------
-The solver accepts PDEs defined symbolically using SymPy syntax. For example:
-&gt;&gt;&gt; from sympy import Function, diff, Eq
-&gt;&gt;&gt; u = Function(&#39;u&#39;)
-&gt;&gt;&gt; t, x = symbols(&#39;t x&#39;)
-&gt;&gt;&gt; eq = Eq(diff(u(t,x), t), diff(u(t,x), x, 2) + u(t,x)**2)
+PDESolver supports full symbolic definition of PDEs using SymPy syntax. It automatically extracts and analyzes:
 
-It automatically extracts:
-- The linear operator L(k)
-- Dispersion relation ω(k)
+- Linear operators in frequency space `L(k)`
+- Dispersion relations `ω(k)`
 - Nonlinear terms
-- Pseudo-differential operators (psiOp)
+- Pseudo-differential operators (`psiOp`)
+- Source terms
+
+Example Definition
+------------------
+```python
+from PDESolver import *
+
+# Define PDE
+t, x, xi = symbols(&#39;t x xi&#39;, real=True)
+u = Function(&#39;u&#39;)
+
+#equation = Eq(diff(u, t, t), diff(u, x, 2) - u) # boundary_condition : &#39;periodic&#39;
+equation = Eq(diff(u(t,x), t), -psiOp(xi**2 + 1, u(t,x))) # boundary_condition : &#39;periodic&#39; or &#39;dirichlet&#39;
+
+# Init solver
+solver = PDESolver(equation)
+
+# Setup domain
+solver.setup(
+    Lx=2*np.pi, Nx=256,
+    Lt=2.0, Nt=1000,
+    initial_condition=lambda x: np.sin(x),
+    initial_velocity=lambda x: 0*x,
+    boundary_condition=&#39;periodic&#39; # or &#39;dirichlet&#39;
+)
+
+# Solve &amp; animate
+solver.solve()
+ani = solver.animate(component=&#39;real&#39;)
+HTML(ani.to_jshtml())
+```
 
 Numerical Methods
 -----------------
-- Fourier-based spectral differentiation
-- Dealiasing for nonlinear terms
-- Temporal integrators:
-    - Default exponential stepping
-    - ETD-RK4 (Exponential Time Differencing Runge-Kutta of 4th order)
+Spectral Differentiation
+-----------------
+- Uses FFT-based spatial differentiation.
+- Dealiasing is applied to nonlinear terms using a sharp cutoff.
+- Handles 1D and 2D spatial domains.
 
-Interactive Analysis
---------------------
+Time Integration
+-----------------
+- First-order evolution:
+  - Default exponential stepping.
+  - ETD-RK4 support for stiff or nonlinear systems.
+- Second-order evolution:
+  - Leapfrog-style update.
+  - ETD-RK4 adapted for second-order systems.
+  - Supports acceleration from pseudo-differential operators.
+
+Pseudo-Differential Operators
+-----------------------------
+- Symbolic expressions like `xi**2 + 1` define the operator symbol.
+- Evaluated using the Kohn–Nirenberg quantization.
+- Supports non-periodic domains and Dirichlet boundary conditions through symbolic inversion.
+
+Interactive Symbol Analysis
+---------------------------
 Use `interactive_symbol_analysis(pseudo_op)` to explore:
-- Group velocity fields
-- Symbol amplitude/phase
-- Hamiltonian flows
-- Characteristic sets
-- Wavefront propagation
 
-Example Usage
--------------
-&gt;&gt;&gt; from sympy import sin, pi
-&gt;&gt;&gt; def initial(x): return sin(2 * pi * x)
-&gt;&gt;&gt; solver = PDESolver(eq)
-&gt;&gt;&gt; solver.setup(Lx=1.0, Nx=256, Lt=1.0, Nt=1000, initial_condition=initial)
-&gt;&gt;&gt; solver.solve()
-&gt;&gt;&gt; ani = solver.animate()
-&gt;&gt;&gt; HTML(ani.to_jshtml())
+- Symbol amplitude and phase
+- Group velocity fields
+- Hamiltonian flows
+- Wavefront sets
+- Characteristic sets
+- Micro-support estimates
+
+This is particularly useful for studying:
+
+- Wave propagation
+- Singularity propagation
+- Stability and dispersion properties
+- Microlocal behavior of solutions
+
+Example Use Case
+----------------
+```python
+from PDESolver import *
+# Definition of symbols
+t, x, xi = symbols(&#39;t x xi&#39;, real=True)
+u = Function(&#39;u&#39;)
+
+# Evolution equation: ∂²u/∂t² = -ψOp(x² + ξ², u)
+p_expr = x**2 + xi**2
+equation = Eq(diff(u(t,x), t, t), -psiOp(p_expr, u(t,x)))
+
+# Creation of the solver
+solver = PDESolver(equation)
+
+# Parameters
+Lx = 12.0
+Nx = 256
+Lt = 3.0
+Nt = 600
+n = 2                     # Order of Hermite
+lambda_n = 2 * n + 1
+
+# Initial function: u₀(x) = Hₙ(x) * exp(-x² / 2)
+initial_condition = lambda x: eval_hermite(n, x) * np.exp(-x**2 / 2)
+
+# Zero initial velocity: ∂ₜ u(0,x) = 0
+initial_velocity = lambda x: 0.0 * x
+
+# Exact solution
+def u_exact(x, t):
+    return np.cos(np.sqrt(lambda_n) * t) * eval_hermite(n, x) * np.exp(-x**2 / 2)
+
+# Solver setup
+solver.setup(
+    Lx=Lx,
+    Nx=Nx,
+    Lt=Lt,
+    Nt=Nt,
+    boundary_condition=&#39;dirichlet&#39;,
+    initial_condition=initial_condition,
+    initial_velocity=initial_velocity,
+)
+
+# Solving
+solver.solve()
+
+# Validation tests
+n_test = 5
+for i in range(n_test + 1):
+    t_eval = i * Lt / n_test
+    solver.test(u_exact=u_exact, t_eval=t_eval, threshold=50, component=&#39;real&#39;)
+```
+
+Applications
+------------
+PDESolver is ideal for:
+
+- Educational tools (visualization of PDE solutions and symbolic analysis)
+- Microlocal analysis (wavefront sets, Hamiltonian flows)
+- Operator theory (pseudo-differential calculus, inversion, adjoints)
+
+Dependencies
+------------
+- numpy, scipy
+- sympy for symbolic manipulation
+- matplotlib for visualization
+- ipywidgets for interactive analysis
+- scipy.fft, scipy.integrate, scipy.signal
 &#34;&#34;&#34;
 import numpy as np
 import matplotlib.pyplot as plt
@@ -2049,8 +2321,7 @@ class PDESolver:
 
     Example Usage:
     --------------
-    &gt;&gt;&gt; from sympy import Function, diff, Eq
-    &gt;&gt;&gt; from matplotlib import pyplot as plt
+    &gt;&gt;&gt; from PDESolver import *
     &gt;&gt;&gt; u = Function(&#39;u&#39;)
     &gt;&gt;&gt; t, x = symbols(&#39;t x&#39;)
     &gt;&gt;&gt; eq = Eq(diff(u(t, x), t), diff(u(t, x), x, 2) + u(t, x)**2)
@@ -2071,6 +2342,7 @@ class PDESolver:
         numerical structures for solving in spectral space.
 
         Supported features:
+        
         - 1D and 2D problems
         - Time-dependent and stationary equations
         - Linear and nonlinear terms
@@ -2081,15 +2353,21 @@ class PDESolver:
         pseudo-differential components. Symbolic manipulation is used to derive 
         the Fourier representation of linear operators when applicable.
 
-        Args:
-            equation (sympy.Eq): The PDE expressed as a SymPy equation.
-            time_scheme (str): Temporal integration scheme; &#39;default&#39; for exponential 
-                               time-stepping or &#39;ETD-RK4&#39; for fourth-order exponential 
-                               time differencing Runge–Kutta.
-            dealiasing_ratio (float): Fraction of high-frequency modes to zero out 
-                                     during dealiasing (e.g., 2/3 for standard truncation).
+        Parameters
+        ----------
+        equation : sympy.Eq 
+            The PDE expressed as a SymPy equation.
+        time_scheme : str
+            Temporal integration scheme: 
+                - &#39;default&#39; for exponential 
+                - time-stepping or &#39;ETD-RK4&#39; for fourth-order exponential 
+                - time differencing Runge–Kutta.
+        dealiasing_ratio : float
+            Fraction of high-frequency modes to zero out 
+            during dealiasing (e.g., 2/3 for standard truncation).
 
         Attributes initialized:
+        
         - self.u: the unknown function (e.g., u(t, x))
         - self.dim: spatial dimension (1 or 2)
         - self.spatial_vars: list of spatial variables (e.g., [x] or [x, y])
@@ -2219,12 +2497,13 @@ class PDESolver:
         - Source terms (independent of u)
         - Pseudo-differential operators (psiOp)
     
-        Args:
+        Parameters
             equation (sympy.Eq): The partial differential equation to be analyzed. 
                                  Can be provided as an Eq object or a sympy expression.
     
         Returns:
             tuple: A 5-tuple containing:
+            
                 - linear_terms (dict): Mapping from derivative/function to coefficient.
                 - nonlinear_terms (list): List of terms classified as nonlinear.
                 - symbol_terms (list): List of (coefficient, symbolic operator) pairs.
@@ -2387,15 +2666,15 @@ class PDESolver:
     
         Sets:
         -----
-        self.L_symbolic : sympy.Expr
+        - self.L_symbolic : sympy.Expr
             Symbolic form of L(k).
-        self.L : callable
+        - self.L : callable
             Numerical function of L(kx[, ky]).
-        self.omega : callable or None
+        - self.omega : callable or None
             Frequency root ω(k), if available.
-        self.temporal_order : int
+        - self.temporal_order : int
             Order of time derivatives detected.
-        self.psi_ops : list of (coeff, PseudoDifferentialOperator)
+        - self.psi_ops : list of (coeff, PseudoDifferentialOperator)
             Pseudo-differential terms present in the equation.
     
         Raises:
@@ -2660,27 +2939,27 @@ class PDESolver:
     
         Attributes Set
         --------------
-        self.Lx : float
+        - self.Lx : float
             Size of the spatial domain.
-        self.Nx : int
+        - self.Nx : int
             Number of spatial points.
-        self.x_grid : np.ndarray
+        - self.x_grid : np.ndarray
             1D array of spatial coordinates.
-        self.X : np.ndarray
+        - self.X : np.ndarray
             Alias to `self.x_grid`, used in physical space computations.
-        self.kx : np.ndarray
+        - self.kx : np.ndarray
             Array of wavenumbers corresponding to the Fourier transform.
-        self.KX : np.ndarray
+        - self.KX : np.ndarray
             Alias to `self.kx`, used in frequency space computations.
-        self.dealiasing_mask : np.ndarray
+        - self.dealiasing_mask : np.ndarray
             Boolean mask used to suppress aliased frequencies during nonlinear calculations.
-        self.exp_L : np.ndarray
+        - self.exp_L : np.ndarray
             Exponential of the linear operator scaled by time step: exp(L(k) · dt).
-        self.omega_val : np.ndarray
+        - self.omega_val : np.ndarray
             Frequency values ω(k) = Re[√(L(k))] used in second-order time stepping.
-        self.cos_omega_dt, self.sin_omega_dt : np.ndarray
+        - self.cos_omega_dt, self.sin_omega_dt : np.ndarray
             Cosine and sine of ω(k)·dt for dispersive propagation.
-        self.inv_omega : np.ndarray
+        - self.inv_omega : np.ndarray
             Inverse of ω(k), used to avoid division-by-zero in time stepping.
     
         Notes
@@ -2739,27 +3018,27 @@ class PDESolver:
     
         Attributes Set
         --------------
-        self.Lx, self.Ly : float
+        - self.Lx, self.Ly : float
             Size of the spatial domain in each direction.
-        self.Nx, self.Ny : int
+        - self.Nx, self.Ny : int
             Number of spatial points in each direction.
-        self.x_grid, self.y_grid : np.ndarray
+        - self.x_grid, self.y_grid : np.ndarray
             1D arrays of spatial coordinates in x and y directions.
-        self.X, self.Y : np.ndarray
+        - self.X, self.Y : np.ndarray
             2D meshgrids of spatial coordinates for physical space computations.
-        self.kx, self.ky : np.ndarray
+        - self.kx, self.ky : np.ndarray
             Arrays of wavenumbers corresponding to Fourier transforms in x and y directions.
-        self.KX, self.KY : np.ndarray
+        - self.KX, self.KY : np.ndarray
             Meshgrids of wavenumbers used in frequency space computations.
-        self.dealiasing_mask : np.ndarray
+        - self.dealiasing_mask : np.ndarray
             Boolean mask used to suppress aliased frequencies during nonlinear calculations.
-        self.exp_L : np.ndarray
+        - self.exp_L : np.ndarray
             Exponential of the linear operator scaled by time step: exp(L(kx, ky) · dt).
-        self.omega_val : np.ndarray
+        - self.omega_val : np.ndarray
             Frequency values ω(kx, ky) = Re[√(L(kx, ky))] used in second-order time stepping.
-        self.cos_omega_dt, self.sin_omega_dt : np.ndarray
+        - self.cos_omega_dt, self.sin_omega_dt : np.ndarray
             Cosine and sine of ω(kx, ky)·dt for dispersive propagation.
-        self.inv_omega : np.ndarray
+        - self.inv_omega : np.ndarray
             Inverse of ω(kx, ky), used to avoid division-by-zero in time stepping.
     
         Notes
@@ -2819,13 +3098,13 @@ class PDESolver:
     
         Attributes Set
         --------------
-        self.omega_val : np.ndarray
+        - self.omega_val : np.ndarray
             Copy of the input angular frequency array.
-        self.cos_omega_dt : np.ndarray
+        - self.cos_omega_dt : np.ndarray
             Cosine of ω(k) multiplied by time step: cos(ω(k) · dt).
-        self.sin_omega_dt : np.ndarray
+        - self.sin_omega_dt : np.ndarray
             Sine of ω(k) multiplied by time step: sin(ω(k) · dt).
-        self.inv_omega : np.ndarray
+        - self.inv_omega : np.ndarray
             Inverse of ω(k), with zeros where ω(k) == 0 to avoid division by zero.
     
         Notes
@@ -3028,14 +3307,18 @@ class PDESolver:
         ensures numerical stability by removing high-frequency components that could lead 
         to aliasing errors.
 
-        Parameters:
-            u (numpy.ndarray): Current solution array on the spatial grid.
-            is_v (bool): If True, evaluates nonlinear terms for the velocity field v instead of u.
+        Parameters
+        ----------
+        u : numpy.ndarray
+            Current solution array on the spatial grid.
+        is_v : bool
+            If True, evaluates nonlinear terms for the velocity field v instead of u.
 
         Returns:
             numpy.ndarray: Array representing the contribution of nonlinear terms multiplied by dt.
 
         Notes:
+        
         - In 1D, computes ∂ₓu via FFT and substitutes any derivative term in the nonlinear expressions.
         - In 2D, computes ∂ₓu and ∂ᵧu via FFT and performs similar substitutions.
         - Uses lambdify to evaluate symbolic nonlinear expressions numerically.
@@ -3158,14 +3441,17 @@ class PDESolver:
         a callable NumPy-compatible function. The function accepts spatial and frequency variables
         depending on the dimensionality of the problem.
     
-        Parameters:
-            expr (sympy.Expr): A SymPy expression representing the symbol of the pseudo-differential operator.
-                                It may depend on spatial variables (x, y) and frequency variables (xi, eta).
+        Parameters
+        ----------
+        expr : sympy expression
+            A SymPy expression representing the symbol of the pseudo-differential operator. It may depend on spatial variables (x, y) and frequency variables (xi, eta).
     
         Returns:
-            function: A lambdified function that takes:
+            function : A lambdified function that takes:
+            
                 - In 1D: `(x, xi)` — spatial coordinate and frequency.
                 - In 2D: `(x, y, xi, eta)` — spatial coordinates and frequencies.
+                
               Returns a NumPy array of evaluated symbol values over input grids.
     
         Notes:
@@ -3185,25 +3471,26 @@ class PDESolver:
         Apply the pseudo-differential operator to the input field u.
     
         This method dispatches the application of the pseudo-differential operator based on:
+        
         - Whether the symbol is spatially dependent (x/y)
         - The boundary condition in use (periodic or dirichlet)
     
         Supported operations:
+        
         - Constant-coefficient symbols: applied via Fourier multiplication.
         - Spatially varying symbols: applied via Kohn–Nirenberg quantization.
         - Dirichlet boundary conditions: handled with non-periodic convolution-like quantization.
     
-        Dispatch Logic:
-        if not self.is_spatial:
-            u ↦ Op(p)(D) ⋅ u = 𝓕⁻¹[ p(ξ) ⋅ 𝓕(u) ]
-        elif periodic:
-            u ↦ Op(p)(x,D) ⋅ u ≈ ∫ eᶦˣᶿ p(x, ξ) 𝓕(u)(ξ) dξ
-        elif dirichlet:
-            u ↦ Op(p)(x,y,D) ⋅ u ≈ non-periodic extension + convolution
+        Dispatch Logic:\n
+        if not self.is_spatial: u ↦ Op(p)(D) ⋅ u = 𝓕⁻¹[ p(ξ) ⋅ 𝓕(u) ]\n
+        elif periodic: u ↦ Op(p)(x,D) ⋅ u ≈ ∫ eᶦˣᶿ p(x, ξ) 𝓕(u)(ξ) dξ based of FFT (quicker)\n
+        elif dirichlet: u ↦ Op(p)(x,D) ⋅ u ≈ u ≈ ∫ eᶦˣᶿ p(x, ξ) 𝓕(u)(ξ) dξ (slower)\n
     
-        Parameters:
-            u (np.ndarray): Input field to which the operator is applied.
-                            Should be 1D or 2D depending on the problem dimension.
+        Parameters
+        ----------
+        u : np.ndarray 
+            Input field to which the operator is applied.
+            Should be 1D or 2D depending on the problem dimension.
     
         Returns:
             np.ndarray: Result of applying the pseudo-differential operator to u.
@@ -3236,15 +3523,13 @@ class PDESolver:
 
         The dealiasing mask is applied before returning to physical space.
         
-        Parameters:
-        -----------
-        u : numpy.ndarray
+        Parameters
+        ----------
+        u : np.ndarray
             Input function in physical space (real-valued or complex-valued)
 
         Returns:
-        --------
-        numpy.ndarray
-            Result of applying the pseudo-differential operator to u, same shape as input
+            np.ndarray : Result of applying the pseudo-differential operator to u, same shape as input
         &#34;&#34;&#34;
         u_hat = self.fft(u)
         u_hat *= -self.combined_symbol
@@ -3259,8 +3544,10 @@ class PDESolver:
         computed from all psiOp terms in the equation. It uses the fast Fourier transform (FFT) for
         efficiency in periodic domains.
     
-        Parameters:
-            u (np.ndarray): Input function in real space to which the operator is applied.
+        Parameters
+        ----------
+        u : np.ndarray
+            Input function in real space to which the operator is applied.
     
         Returns:
             np.ndarray: Resulting function after applying the pseudo-differential operator.
@@ -3289,8 +3576,10 @@ class PDESolver:
         The operator symbol p(x, ξ) is extracted from the PDE and evaluated numerically using 
         `_total_symbol_expr` and `_build_symbol_func`.
     
-        Parameters:
-            u (np.ndarray): Input function (real space) to which the operator is applied.
+        Parameters
+        ----------
+        u : np.ndarray
+            Input function (real space) to which the operator is applied.
     
         Returns:
             np.ndarray: Result of applying Op(p) to u in real space.
@@ -3341,7 +3630,7 @@ class PDESolver:
     
         Boundary conditions are applied after each update to ensure consistency.
     
-        Args:
+        Parameters
             source_contribution (np.ndarray): Array representing the external source term at current time step.
                                               Must match the spatial dimensions of self.u_prev.
     
@@ -3418,7 +3707,7 @@ class PDESolver:
     
         Boundary conditions are applied after each update to ensure consistency.
     
-        Args:
+        Parameters
             source_contribution (np.ndarray): Array representing the external source term at current time step.
                                               Must match the spatial dimensions of self.u_prev.
     
@@ -4038,7 +4327,7 @@ class PDESolver:
         
         where φ denotes the nonlinear contributions evaluated at intermediate stages.
     
-        Args:
+        Parameters
             u (np.ndarray): Current solution in real space (physical grid values).
     
         Returns:
@@ -4171,16 +4460,20 @@ class PDESolver:
         per time step. A safety factor of 0.5 is applied by default to ensure robustness.
     
         Notes:
+        
         - In 1D, the group velocity v₉(k) = dω/dk is used to compute the maximum wave speed.
         - In 2D, the x- and y-directional group velocities are evaluated independently.
         - If no dispersion relation is available, the imaginary part of the linear operator L(k) 
           is used as an approximation for wave speed.
     
         Raises:
-        - NotImplementedError: If the spatial dimension is not 1D or 2D.
+        -------
+        NotImplementedError: 
+            If the spatial dimension is not 1D or 2D.
     
         Prints:
-        - Warning message if the current time step dt exceeds the CFL-stable limit.
+        -------
+        Warning message if the current time step dt exceeds the CFL-stable limit.
         &#34;&#34;&#34;
         print(&#34;\n*****************&#34;)
         print(&#34;* CFL condition *&#34;)
@@ -4231,7 +4524,6 @@ class PDESolver:
     def check_symbol_conditions(self, k_range=None, verbose=True):
         &#34;&#34;&#34;
         Check strict analytic conditions on the linear symbol self.L_symbolic:
-        
             This method evaluates three key properties of the Fourier multiplier 
             symbol a(k) = self.L(k), which are crucial for well-posedness, stability,
             and numerical efficiency. The checks apply to both 1D and 2D cases.
@@ -4248,8 +4540,8 @@ class PDESolver:
            Ensures that the symbol does not grow too rapidly with frequency, 
            which would otherwise cause numerical instability or unphysical amplification.
     
-        Parameters:
-        -----------
+        Parameters
+        ----------
         k_range : tuple or None, optional
             Specifies the range of frequencies to test in the form (k_min, k_max, N).
             If None, defaults are used: [-10, 10] with 500 points in 1D, or [-10, 10] 
@@ -4346,6 +4638,7 @@ class PDESolver:
         Perform a detailed analysis of wave propagation characteristics based on the dispersion relation ω(k).
     
         This method visualizes key wave properties in both 1D and 2D settings:
+        
         - Dispersion relation: ω(k)
         - Phase velocity: v_p(k) = ω(k)/|k|
         - Group velocity: v_g(k) = ∇ₖ ω(k)
@@ -4450,22 +4743,28 @@ class PDESolver:
         kx and ky (2D). The user can choose to display the real part, imaginary part, 
         or absolute value of the symbol.
     
-        Parameters:
-            component : str {&#39;abs&#39;, &#39;re&#39;, &#39;im&#39;}
-                Component of the symbol to visualize:
-                    - &#39;abs&#39; : absolute value |a(k)|
-                    - &#39;re&#39;  : real part Re[a(k)]
-                    - &#39;im&#39;  : imaginary part Im[a(k)]
-            k_range : tuple (kmin, kmax, N), optional
-                Wavenumber range for evaluation:
-                    - kmin: minimum wavenumber
-                    - kmax: maximum wavenumber
-                    - N: number of sampling points
-                If None, defaults to [-10, 10] with high resolution.
-            cmap : str, optional
-                Colormap used for 2D surface plots. Default is &#39;viridis&#39;.
+        Parameters
+        ----------
+        component : str {&#39;abs&#39;, &#39;re&#39;, &#39;im&#39;}
+            Component of the symbol to visualize:
+            
+                - &#39;abs&#39; : absolute value |a(k)|
+                - &#39;re&#39;  : real part Re[a(k)]
+                - &#39;im&#39;  : imaginary part Im[a(k)]
+                
+        k_range : tuple (kmin, kmax, N), optional
+            Wavenumber range for evaluation:
+            
+                - kmin: minimum wavenumber
+                - kmax: maximum wavenumber
+                - N: number of sampling points
+                
+            If None, defaults to [-10, 10] with high resolution.
+        cmap : str, optional
+            Colormap used for 2D surface plots. Default is &#39;viridis&#39;.
     
-        Raises:
+        Raises
+        ------
             ValueError: If the spatial dimension is not 1D or 2D.
     
         Notes:
@@ -4552,11 +4851,13 @@ class PDESolver:
         This method supports both 1D and 2D problems and is only meaningful when 
         self.temporal_order == 2 (second-order time derivative).
     
-        Returns:
-        - float or None: Total energy at current time step. Returns None if the 
-          temporal order is not 2 or if no valid velocity data (v_prev) is available.
+        Returns
+        -------
+        float or None: 
+            Total energy at current time step. Returns None if the temporal order is not 2 or if no valid velocity data (v_prev) is available.
     
-        Notes:
+        Notes
+        -----
         - Uses FFT-based spectral differentiation to compute the spatial contributions.
         - Assumes periodic boundary conditions.
         - Handles both real and complex-valued solutions.
@@ -4733,15 +5034,17 @@ class PDESolver:
         ----------
         component : str in {&#39;real&#39;, &#39;imag&#39;, &#39;abs&#39;, &#39;angle&#39;}
             The component of the solution to visualize:
-            - &#39;real&#39; : Real part Re(u)
-            - &#39;imag&#39; : Imaginary part Im(u)
-            - &#39;abs&#39; : Absolute value |u|
-            - &#39;angle&#39; : Complex argument arg(u)
+            
+              - &#39;real&#39; : Real part Re(u)
+              - &#39;imag&#39; : Imaginary part Im(u)
+              - &#39;abs&#39; : Absolute value |u|
+              - &#39;angle&#39; : Complex argument arg(u)
 
         overlay : str in {&#39;contour&#39;, &#39;front&#39;}, optional
             Type of overlay for 2D animations:
-            - &#39;contour&#39; : Adds contour lines beneath the surface at each frame.
-            - &#39;front&#39; : Used for tracking wavefronts.
+            
+              - &#39;contour&#39; : Adds contour lines beneath the surface at each frame.
+              - &#39;front&#39; : Used for tracking wavefronts.
 
         Returns
         -------
@@ -5073,8 +5376,7 @@ It is designed for both <strong>linear and nonlinear time-dependent PDEs</strong
 <li>Asymptotic inversion of elliptic operators for stationary problems</li>
 </ul>
 <h2 id="example-usage">Example Usage:</h2>
-<pre><code class="language-python-repl">&gt;&gt;&gt; from sympy import Function, diff, Eq
-&gt;&gt;&gt; from matplotlib import pyplot as plt
+<pre><code class="language-python-repl">&gt;&gt;&gt; from PDESolver import *
 &gt;&gt;&gt; u = Function('u')
 &gt;&gt;&gt; t, x = symbols('t x')
 &gt;&gt;&gt; eq = Eq(diff(u(t, x), t), diff(u(t, x), x, 2) + u(t, x)**2)
@@ -5090,39 +5392,44 @@ It is designed for both <strong>linear and nonlinear time-dependent PDEs</strong
 identifies the unknown function and its dependencies, determines whether
 the problem is stationary or time-dependent, and prepares symbolic and
 numerical structures for solving in spectral space.</p>
-<p>Supported features:
-- 1D and 2D problems
-- Time-dependent and stationary equations
-- Linear and nonlinear terms
-- Pseudo-differential operators via <code><a title="PDESolver.psiOp" href="#PDESolver.psiOp">psiOp</a></code>
-- Source terms and boundary conditions</p>
+<p>Supported features:</p>
+<ul>
+<li>1D and 2D problems</li>
+<li>Time-dependent and stationary equations</li>
+<li>Linear and nonlinear terms</li>
+<li>Pseudo-differential operators via <code><a title="PDESolver.psiOp" href="#PDESolver.psiOp">psiOp</a></code></li>
+<li>Source terms and boundary conditions</li>
+</ul>
 <p>The equation is parsed to extract linear, nonlinear, source, and
 pseudo-differential components. Symbolic manipulation is used to derive
 the Fourier representation of linear operators when applicable.</p>
-<h2 id="args">Args</h2>
+<h2 id="parameters">Parameters</h2>
 <dl>
-<dt><strong><code>equation</code></strong> :&ensp;<code>sympy.Eq</code></dt>
+<dt><strong><code>equation</code></strong> :&ensp;<code>sympy.Eq </code></dt>
 <dd>The PDE expressed as a SymPy equation.</dd>
 <dt><strong><code>time_scheme</code></strong> :&ensp;<code>str</code></dt>
-<dd>Temporal integration scheme; 'default' for exponential
-time-stepping or 'ETD-RK4' for fourth-order exponential
-time differencing Runge–Kutta.</dd>
+<dd>Temporal integration scheme:
+- 'default' for exponential
+- time-stepping or 'ETD-RK4' for fourth-order exponential
+- time differencing Runge–Kutta.</dd>
 <dt><strong><code>dealiasing_ratio</code></strong> :&ensp;<code>float</code></dt>
 <dd>Fraction of high-frequency modes to zero out
 during dealiasing (e.g., 2/3 for standard truncation).</dd>
 </dl>
-<p>Attributes initialized:
-- self.u: the unknown function (e.g., u(t, x))
-- self.dim: spatial dimension (1 or 2)
-- self.spatial_vars: list of spatial variables (e.g., [x] or [x, y])
-- self.is_stationary: boolean indicating if the problem is stationary
-- self.linear_terms: dictionary mapping derivative orders to coefficients
-- self.nonlinear_terms: list of nonlinear expressions
-- self.source_terms: list of source functions
-- self.pseudo_terms: list of pseudo-differential operator expressions
-- self.has_psi: boolean indicating presence of pseudo-differential operators
-- self.fft / self.ifft: appropriate FFT routines based on spatial dimension
-- self.kx, self.ky: symbolic wavenumber variables for Fourier space</p>
+<p>Attributes initialized:</p>
+<ul>
+<li>self.u: the unknown function (e.g., u(t, x))</li>
+<li>self.dim: spatial dimension (1 or 2)</li>
+<li>self.spatial_vars: list of spatial variables (e.g., [x] or [x, y])</li>
+<li>self.is_stationary: boolean indicating if the problem is stationary</li>
+<li>self.linear_terms: dictionary mapping derivative orders to coefficients</li>
+<li>self.nonlinear_terms: list of nonlinear expressions</li>
+<li>self.source_terms: list of source functions</li>
+<li>self.pseudo_terms: list of pseudo-differential operator expressions</li>
+<li>self.has_psi: boolean indicating presence of pseudo-differential operators</li>
+<li>self.fft / self.ifft: appropriate FFT routines based on spatial dimension</li>
+<li>self.kx, self.ky: symbolic wavenumber variables for Fourier space</li>
+</ul>
 <h2 id="raises">Raises</h2>
 <dl>
 <dt><code>ValueError</code></dt>
@@ -5164,8 +5471,7 @@ if unsupported dimensions are detected, or invalid dependencies.</dd>
 
     Example Usage:
     --------------
-    &gt;&gt;&gt; from sympy import Function, diff, Eq
-    &gt;&gt;&gt; from matplotlib import pyplot as plt
+    &gt;&gt;&gt; from PDESolver import *
     &gt;&gt;&gt; u = Function(&#39;u&#39;)
     &gt;&gt;&gt; t, x = symbols(&#39;t x&#39;)
     &gt;&gt;&gt; eq = Eq(diff(u(t, x), t), diff(u(t, x), x, 2) + u(t, x)**2)
@@ -5186,6 +5492,7 @@ if unsupported dimensions are detected, or invalid dependencies.</dd>
         numerical structures for solving in spectral space.
 
         Supported features:
+        
         - 1D and 2D problems
         - Time-dependent and stationary equations
         - Linear and nonlinear terms
@@ -5196,15 +5503,21 @@ if unsupported dimensions are detected, or invalid dependencies.</dd>
         pseudo-differential components. Symbolic manipulation is used to derive 
         the Fourier representation of linear operators when applicable.
 
-        Args:
-            equation (sympy.Eq): The PDE expressed as a SymPy equation.
-            time_scheme (str): Temporal integration scheme; &#39;default&#39; for exponential 
-                               time-stepping or &#39;ETD-RK4&#39; for fourth-order exponential 
-                               time differencing Runge–Kutta.
-            dealiasing_ratio (float): Fraction of high-frequency modes to zero out 
-                                     during dealiasing (e.g., 2/3 for standard truncation).
+        Parameters
+        ----------
+        equation : sympy.Eq 
+            The PDE expressed as a SymPy equation.
+        time_scheme : str
+            Temporal integration scheme: 
+                - &#39;default&#39; for exponential 
+                - time-stepping or &#39;ETD-RK4&#39; for fourth-order exponential 
+                - time differencing Runge–Kutta.
+        dealiasing_ratio : float
+            Fraction of high-frequency modes to zero out 
+            during dealiasing (e.g., 2/3 for standard truncation).
 
         Attributes initialized:
+        
         - self.u: the unknown function (e.g., u(t, x))
         - self.dim: spatial dimension (1 or 2)
         - self.spatial_vars: list of spatial variables (e.g., [x] or [x, y])
@@ -5334,12 +5647,13 @@ if unsupported dimensions are detected, or invalid dependencies.</dd>
         - Source terms (independent of u)
         - Pseudo-differential operators (psiOp)
     
-        Args:
+        Parameters
             equation (sympy.Eq): The partial differential equation to be analyzed. 
                                  Can be provided as an Eq object or a sympy expression.
     
         Returns:
             tuple: A 5-tuple containing:
+            
                 - linear_terms (dict): Mapping from derivative/function to coefficient.
                 - nonlinear_terms (list): List of terms classified as nonlinear.
                 - symbol_terms (list): List of (coefficient, symbolic operator) pairs.
@@ -5502,15 +5816,15 @@ if unsupported dimensions are detected, or invalid dependencies.</dd>
     
         Sets:
         -----
-        self.L_symbolic : sympy.Expr
+        - self.L_symbolic : sympy.Expr
             Symbolic form of L(k).
-        self.L : callable
+        - self.L : callable
             Numerical function of L(kx[, ky]).
-        self.omega : callable or None
+        - self.omega : callable or None
             Frequency root ω(k), if available.
-        self.temporal_order : int
+        - self.temporal_order : int
             Order of time derivatives detected.
-        self.psi_ops : list of (coeff, PseudoDifferentialOperator)
+        - self.psi_ops : list of (coeff, PseudoDifferentialOperator)
             Pseudo-differential terms present in the equation.
     
         Raises:
@@ -5775,27 +6089,27 @@ if unsupported dimensions are detected, or invalid dependencies.</dd>
     
         Attributes Set
         --------------
-        self.Lx : float
+        - self.Lx : float
             Size of the spatial domain.
-        self.Nx : int
+        - self.Nx : int
             Number of spatial points.
-        self.x_grid : np.ndarray
+        - self.x_grid : np.ndarray
             1D array of spatial coordinates.
-        self.X : np.ndarray
+        - self.X : np.ndarray
             Alias to `self.x_grid`, used in physical space computations.
-        self.kx : np.ndarray
+        - self.kx : np.ndarray
             Array of wavenumbers corresponding to the Fourier transform.
-        self.KX : np.ndarray
+        - self.KX : np.ndarray
             Alias to `self.kx`, used in frequency space computations.
-        self.dealiasing_mask : np.ndarray
+        - self.dealiasing_mask : np.ndarray
             Boolean mask used to suppress aliased frequencies during nonlinear calculations.
-        self.exp_L : np.ndarray
+        - self.exp_L : np.ndarray
             Exponential of the linear operator scaled by time step: exp(L(k) · dt).
-        self.omega_val : np.ndarray
+        - self.omega_val : np.ndarray
             Frequency values ω(k) = Re[√(L(k))] used in second-order time stepping.
-        self.cos_omega_dt, self.sin_omega_dt : np.ndarray
+        - self.cos_omega_dt, self.sin_omega_dt : np.ndarray
             Cosine and sine of ω(k)·dt for dispersive propagation.
-        self.inv_omega : np.ndarray
+        - self.inv_omega : np.ndarray
             Inverse of ω(k), used to avoid division-by-zero in time stepping.
     
         Notes
@@ -5854,27 +6168,27 @@ if unsupported dimensions are detected, or invalid dependencies.</dd>
     
         Attributes Set
         --------------
-        self.Lx, self.Ly : float
+        - self.Lx, self.Ly : float
             Size of the spatial domain in each direction.
-        self.Nx, self.Ny : int
+        - self.Nx, self.Ny : int
             Number of spatial points in each direction.
-        self.x_grid, self.y_grid : np.ndarray
+        - self.x_grid, self.y_grid : np.ndarray
             1D arrays of spatial coordinates in x and y directions.
-        self.X, self.Y : np.ndarray
+        - self.X, self.Y : np.ndarray
             2D meshgrids of spatial coordinates for physical space computations.
-        self.kx, self.ky : np.ndarray
+        - self.kx, self.ky : np.ndarray
             Arrays of wavenumbers corresponding to Fourier transforms in x and y directions.
-        self.KX, self.KY : np.ndarray
+        - self.KX, self.KY : np.ndarray
             Meshgrids of wavenumbers used in frequency space computations.
-        self.dealiasing_mask : np.ndarray
+        - self.dealiasing_mask : np.ndarray
             Boolean mask used to suppress aliased frequencies during nonlinear calculations.
-        self.exp_L : np.ndarray
+        - self.exp_L : np.ndarray
             Exponential of the linear operator scaled by time step: exp(L(kx, ky) · dt).
-        self.omega_val : np.ndarray
+        - self.omega_val : np.ndarray
             Frequency values ω(kx, ky) = Re[√(L(kx, ky))] used in second-order time stepping.
-        self.cos_omega_dt, self.sin_omega_dt : np.ndarray
+        - self.cos_omega_dt, self.sin_omega_dt : np.ndarray
             Cosine and sine of ω(kx, ky)·dt for dispersive propagation.
-        self.inv_omega : np.ndarray
+        - self.inv_omega : np.ndarray
             Inverse of ω(kx, ky), used to avoid division-by-zero in time stepping.
     
         Notes
@@ -5934,13 +6248,13 @@ if unsupported dimensions are detected, or invalid dependencies.</dd>
     
         Attributes Set
         --------------
-        self.omega_val : np.ndarray
+        - self.omega_val : np.ndarray
             Copy of the input angular frequency array.
-        self.cos_omega_dt : np.ndarray
+        - self.cos_omega_dt : np.ndarray
             Cosine of ω(k) multiplied by time step: cos(ω(k) · dt).
-        self.sin_omega_dt : np.ndarray
+        - self.sin_omega_dt : np.ndarray
             Sine of ω(k) multiplied by time step: sin(ω(k) · dt).
-        self.inv_omega : np.ndarray
+        - self.inv_omega : np.ndarray
             Inverse of ω(k), with zeros where ω(k) == 0 to avoid division by zero.
     
         Notes
@@ -6143,14 +6457,18 @@ if unsupported dimensions are detected, or invalid dependencies.</dd>
         ensures numerical stability by removing high-frequency components that could lead 
         to aliasing errors.
 
-        Parameters:
-            u (numpy.ndarray): Current solution array on the spatial grid.
-            is_v (bool): If True, evaluates nonlinear terms for the velocity field v instead of u.
+        Parameters
+        ----------
+        u : numpy.ndarray
+            Current solution array on the spatial grid.
+        is_v : bool
+            If True, evaluates nonlinear terms for the velocity field v instead of u.
 
         Returns:
             numpy.ndarray: Array representing the contribution of nonlinear terms multiplied by dt.
 
         Notes:
+        
         - In 1D, computes ∂ₓu via FFT and substitutes any derivative term in the nonlinear expressions.
         - In 2D, computes ∂ₓu and ∂ᵧu via FFT and performs similar substitutions.
         - Uses lambdify to evaluate symbolic nonlinear expressions numerically.
@@ -6273,14 +6591,17 @@ if unsupported dimensions are detected, or invalid dependencies.</dd>
         a callable NumPy-compatible function. The function accepts spatial and frequency variables
         depending on the dimensionality of the problem.
     
-        Parameters:
-            expr (sympy.Expr): A SymPy expression representing the symbol of the pseudo-differential operator.
-                                It may depend on spatial variables (x, y) and frequency variables (xi, eta).
+        Parameters
+        ----------
+        expr : sympy expression
+            A SymPy expression representing the symbol of the pseudo-differential operator. It may depend on spatial variables (x, y) and frequency variables (xi, eta).
     
         Returns:
-            function: A lambdified function that takes:
+            function : A lambdified function that takes:
+            
                 - In 1D: `(x, xi)` — spatial coordinate and frequency.
                 - In 2D: `(x, y, xi, eta)` — spatial coordinates and frequencies.
+                
               Returns a NumPy array of evaluated symbol values over input grids.
     
         Notes:
@@ -6300,25 +6621,26 @@ if unsupported dimensions are detected, or invalid dependencies.</dd>
         Apply the pseudo-differential operator to the input field u.
     
         This method dispatches the application of the pseudo-differential operator based on:
+        
         - Whether the symbol is spatially dependent (x/y)
         - The boundary condition in use (periodic or dirichlet)
     
         Supported operations:
+        
         - Constant-coefficient symbols: applied via Fourier multiplication.
         - Spatially varying symbols: applied via Kohn–Nirenberg quantization.
         - Dirichlet boundary conditions: handled with non-periodic convolution-like quantization.
     
-        Dispatch Logic:
-        if not self.is_spatial:
-            u ↦ Op(p)(D) ⋅ u = 𝓕⁻¹[ p(ξ) ⋅ 𝓕(u) ]
-        elif periodic:
-            u ↦ Op(p)(x,D) ⋅ u ≈ ∫ eᶦˣᶿ p(x, ξ) 𝓕(u)(ξ) dξ
-        elif dirichlet:
-            u ↦ Op(p)(x,y,D) ⋅ u ≈ non-periodic extension + convolution
+        Dispatch Logic:\n
+        if not self.is_spatial: u ↦ Op(p)(D) ⋅ u = 𝓕⁻¹[ p(ξ) ⋅ 𝓕(u) ]\n
+        elif periodic: u ↦ Op(p)(x,D) ⋅ u ≈ ∫ eᶦˣᶿ p(x, ξ) 𝓕(u)(ξ) dξ based of FFT (quicker)\n
+        elif dirichlet: u ↦ Op(p)(x,D) ⋅ u ≈ u ≈ ∫ eᶦˣᶿ p(x, ξ) 𝓕(u)(ξ) dξ (slower)\n
     
-        Parameters:
-            u (np.ndarray): Input field to which the operator is applied.
-                            Should be 1D or 2D depending on the problem dimension.
+        Parameters
+        ----------
+        u : np.ndarray 
+            Input field to which the operator is applied.
+            Should be 1D or 2D depending on the problem dimension.
     
         Returns:
             np.ndarray: Result of applying the pseudo-differential operator to u.
@@ -6351,15 +6673,13 @@ if unsupported dimensions are detected, or invalid dependencies.</dd>
 
         The dealiasing mask is applied before returning to physical space.
         
-        Parameters:
-        -----------
-        u : numpy.ndarray
+        Parameters
+        ----------
+        u : np.ndarray
             Input function in physical space (real-valued or complex-valued)
 
         Returns:
-        --------
-        numpy.ndarray
-            Result of applying the pseudo-differential operator to u, same shape as input
+            np.ndarray : Result of applying the pseudo-differential operator to u, same shape as input
         &#34;&#34;&#34;
         u_hat = self.fft(u)
         u_hat *= -self.combined_symbol
@@ -6374,8 +6694,10 @@ if unsupported dimensions are detected, or invalid dependencies.</dd>
         computed from all psiOp terms in the equation. It uses the fast Fourier transform (FFT) for
         efficiency in periodic domains.
     
-        Parameters:
-            u (np.ndarray): Input function in real space to which the operator is applied.
+        Parameters
+        ----------
+        u : np.ndarray
+            Input function in real space to which the operator is applied.
     
         Returns:
             np.ndarray: Resulting function after applying the pseudo-differential operator.
@@ -6404,8 +6726,10 @@ if unsupported dimensions are detected, or invalid dependencies.</dd>
         The operator symbol p(x, ξ) is extracted from the PDE and evaluated numerically using 
         `_total_symbol_expr` and `_build_symbol_func`.
     
-        Parameters:
-            u (np.ndarray): Input function (real space) to which the operator is applied.
+        Parameters
+        ----------
+        u : np.ndarray
+            Input function (real space) to which the operator is applied.
     
         Returns:
             np.ndarray: Result of applying Op(p) to u in real space.
@@ -6456,7 +6780,7 @@ if unsupported dimensions are detected, or invalid dependencies.</dd>
     
         Boundary conditions are applied after each update to ensure consistency.
     
-        Args:
+        Parameters
             source_contribution (np.ndarray): Array representing the external source term at current time step.
                                               Must match the spatial dimensions of self.u_prev.
     
@@ -6533,7 +6857,7 @@ if unsupported dimensions are detected, or invalid dependencies.</dd>
     
         Boundary conditions are applied after each update to ensure consistency.
     
-        Args:
+        Parameters
             source_contribution (np.ndarray): Array representing the external source term at current time step.
                                               Must match the spatial dimensions of self.u_prev.
     
@@ -7153,7 +7477,7 @@ if unsupported dimensions are detected, or invalid dependencies.</dd>
         
         where φ denotes the nonlinear contributions evaluated at intermediate stages.
     
-        Args:
+        Parameters
             u (np.ndarray): Current solution in real space (physical grid values).
     
         Returns:
@@ -7286,16 +7610,20 @@ if unsupported dimensions are detected, or invalid dependencies.</dd>
         per time step. A safety factor of 0.5 is applied by default to ensure robustness.
     
         Notes:
+        
         - In 1D, the group velocity v₉(k) = dω/dk is used to compute the maximum wave speed.
         - In 2D, the x- and y-directional group velocities are evaluated independently.
         - If no dispersion relation is available, the imaginary part of the linear operator L(k) 
           is used as an approximation for wave speed.
     
         Raises:
-        - NotImplementedError: If the spatial dimension is not 1D or 2D.
+        -------
+        NotImplementedError: 
+            If the spatial dimension is not 1D or 2D.
     
         Prints:
-        - Warning message if the current time step dt exceeds the CFL-stable limit.
+        -------
+        Warning message if the current time step dt exceeds the CFL-stable limit.
         &#34;&#34;&#34;
         print(&#34;\n*****************&#34;)
         print(&#34;* CFL condition *&#34;)
@@ -7346,7 +7674,6 @@ if unsupported dimensions are detected, or invalid dependencies.</dd>
     def check_symbol_conditions(self, k_range=None, verbose=True):
         &#34;&#34;&#34;
         Check strict analytic conditions on the linear symbol self.L_symbolic:
-        
             This method evaluates three key properties of the Fourier multiplier 
             symbol a(k) = self.L(k), which are crucial for well-posedness, stability,
             and numerical efficiency. The checks apply to both 1D and 2D cases.
@@ -7363,8 +7690,8 @@ if unsupported dimensions are detected, or invalid dependencies.</dd>
            Ensures that the symbol does not grow too rapidly with frequency, 
            which would otherwise cause numerical instability or unphysical amplification.
     
-        Parameters:
-        -----------
+        Parameters
+        ----------
         k_range : tuple or None, optional
             Specifies the range of frequencies to test in the form (k_min, k_max, N).
             If None, defaults are used: [-10, 10] with 500 points in 1D, or [-10, 10] 
@@ -7461,6 +7788,7 @@ if unsupported dimensions are detected, or invalid dependencies.</dd>
         Perform a detailed analysis of wave propagation characteristics based on the dispersion relation ω(k).
     
         This method visualizes key wave properties in both 1D and 2D settings:
+        
         - Dispersion relation: ω(k)
         - Phase velocity: v_p(k) = ω(k)/|k|
         - Group velocity: v_g(k) = ∇ₖ ω(k)
@@ -7565,22 +7893,28 @@ if unsupported dimensions are detected, or invalid dependencies.</dd>
         kx and ky (2D). The user can choose to display the real part, imaginary part, 
         or absolute value of the symbol.
     
-        Parameters:
-            component : str {&#39;abs&#39;, &#39;re&#39;, &#39;im&#39;}
-                Component of the symbol to visualize:
-                    - &#39;abs&#39; : absolute value |a(k)|
-                    - &#39;re&#39;  : real part Re[a(k)]
-                    - &#39;im&#39;  : imaginary part Im[a(k)]
-            k_range : tuple (kmin, kmax, N), optional
-                Wavenumber range for evaluation:
-                    - kmin: minimum wavenumber
-                    - kmax: maximum wavenumber
-                    - N: number of sampling points
-                If None, defaults to [-10, 10] with high resolution.
-            cmap : str, optional
-                Colormap used for 2D surface plots. Default is &#39;viridis&#39;.
+        Parameters
+        ----------
+        component : str {&#39;abs&#39;, &#39;re&#39;, &#39;im&#39;}
+            Component of the symbol to visualize:
+            
+                - &#39;abs&#39; : absolute value |a(k)|
+                - &#39;re&#39;  : real part Re[a(k)]
+                - &#39;im&#39;  : imaginary part Im[a(k)]
+                
+        k_range : tuple (kmin, kmax, N), optional
+            Wavenumber range for evaluation:
+            
+                - kmin: minimum wavenumber
+                - kmax: maximum wavenumber
+                - N: number of sampling points
+                
+            If None, defaults to [-10, 10] with high resolution.
+        cmap : str, optional
+            Colormap used for 2D surface plots. Default is &#39;viridis&#39;.
     
-        Raises:
+        Raises
+        ------
             ValueError: If the spatial dimension is not 1D or 2D.
     
         Notes:
@@ -7667,11 +8001,13 @@ if unsupported dimensions are detected, or invalid dependencies.</dd>
         This method supports both 1D and 2D problems and is only meaningful when 
         self.temporal_order == 2 (second-order time derivative).
     
-        Returns:
-        - float or None: Total energy at current time step. Returns None if the 
-          temporal order is not 2 or if no valid velocity data (v_prev) is available.
+        Returns
+        -------
+        float or None: 
+            Total energy at current time step. Returns None if the temporal order is not 2 or if no valid velocity data (v_prev) is available.
     
-        Notes:
+        Notes
+        -----
         - Uses FFT-based spectral differentiation to compute the spatial contributions.
         - Assumes periodic boundary conditions.
         - Handles both real and complex-valued solutions.
@@ -7848,15 +8184,17 @@ if unsupported dimensions are detected, or invalid dependencies.</dd>
         ----------
         component : str in {&#39;real&#39;, &#39;imag&#39;, &#39;abs&#39;, &#39;angle&#39;}
             The component of the solution to visualize:
-            - &#39;real&#39; : Real part Re(u)
-            - &#39;imag&#39; : Imaginary part Im(u)
-            - &#39;abs&#39; : Absolute value |u|
-            - &#39;angle&#39; : Complex argument arg(u)
+            
+              - &#39;real&#39; : Real part Re(u)
+              - &#39;imag&#39; : Imaginary part Im(u)
+              - &#39;abs&#39; : Absolute value |u|
+              - &#39;angle&#39; : Complex argument arg(u)
 
         overlay : str in {&#39;contour&#39;, &#39;front&#39;}, optional
             Type of overlay for 2D animations:
-            - &#39;contour&#39; : Adds contour lines beneath the surface at each frame.
-            - &#39;front&#39; : Used for tracking wavefronts.
+            
+              - &#39;contour&#39; : Adds contour lines beneath the surface at each frame.
+              - &#39;front&#39; : Used for tracking wavefronts.
 
         Returns
         -------
@@ -8112,11 +8450,13 @@ if unsupported dimensions are detected, or invalid dependencies.</dd>
 </code></dt>
 <dd>
 <div class="desc"><p>Perform a detailed analysis of wave propagation characteristics based on the dispersion relation ω(k).</p>
-<p>This method visualizes key wave properties in both 1D and 2D settings:
-- Dispersion relation: ω(k)
-- Phase velocity: v_p(k) = ω(k)/|k|
-- Group velocity: v_g(k) = ∇ₖ ω(k)
-- Anisotropy in 2D (via magnitude of group velocity)</p>
+<p>This method visualizes key wave properties in both 1D and 2D settings:</p>
+<ul>
+<li>Dispersion relation: ω(k)</li>
+<li>Phase velocity: v_p(k) = ω(k)/|k|</li>
+<li>Group velocity: v_g(k) = ∇ₖ ω(k)</li>
+<li>Anisotropy in 2D (via magnitude of group velocity)</li>
+</ul>
 <p>The symbolic dispersion relation 'omega_symbolic' must be defined beforehand.
 This is typically available only for second-order-in-time equations.</p>
 <p>In 1D:
@@ -8139,6 +8479,7 @@ Generates and displays matplotlib plots.</p></div>
     Perform a detailed analysis of wave propagation characteristics based on the dispersion relation ω(k).
 
     This method visualizes key wave properties in both 1D and 2D settings:
+    
     - Dispersion relation: ω(k)
     - Phase velocity: v_p(k) = ω(k)/|k|
     - Group velocity: v_g(k) = ∇ₖ ω(k)
@@ -8247,15 +8588,23 @@ contour overlays.</p>
 <h2 id="parameters">Parameters</h2>
 <dl>
 <dt><strong><code>component</code></strong> :&ensp;<code>str in {'real', 'imag', 'abs', 'angle'}</code></dt>
-<dd>The component of the solution to visualize:
-- 'real' : Real part Re(u)
-- 'imag' : Imaginary part Im(u)
-- 'abs' : Absolute value |u|
-- 'angle' : Complex argument arg(u)</dd>
+<dd>
+<p>The component of the solution to visualize:</p>
+<ul>
+<li>'real' : Real part Re(u)</li>
+<li>'imag' : Imaginary part Im(u)</li>
+<li>'abs' : Absolute value |u|</li>
+<li>'angle' : Complex argument arg(u)</li>
+</ul>
+</dd>
 <dt><strong><code>overlay</code></strong> :&ensp;<code>str in {'contour', 'front'}</code>, optional</dt>
-<dd>Type of overlay for 2D animations:
-- 'contour' : Adds contour lines beneath the surface at each frame.
-- 'front' : Used for tracking wavefronts.</dd>
+<dd>
+<p>Type of overlay for 2D animations:</p>
+<ul>
+<li>'contour' : Adds contour lines beneath the surface at each frame.</li>
+<li>'front' : Used for tracking wavefronts.</li>
+</ul>
+</dd>
 </dl>
 <h2 id="returns">Returns</h2>
 <dl>
@@ -8286,15 +8635,17 @@ contour overlays.</p>
     ----------
     component : str in {&#39;real&#39;, &#39;imag&#39;, &#39;abs&#39;, &#39;angle&#39;}
         The component of the solution to visualize:
-        - &#39;real&#39; : Real part Re(u)
-        - &#39;imag&#39; : Imaginary part Im(u)
-        - &#39;abs&#39; : Absolute value |u|
-        - &#39;angle&#39; : Complex argument arg(u)
+        
+          - &#39;real&#39; : Real part Re(u)
+          - &#39;imag&#39; : Imaginary part Im(u)
+          - &#39;abs&#39; : Absolute value |u|
+          - &#39;angle&#39; : Complex argument arg(u)
 
     overlay : str in {&#39;contour&#39;, &#39;front&#39;}, optional
         Type of overlay for 2D animations:
-        - &#39;contour&#39; : Adds contour lines beneath the surface at each frame.
-        - &#39;front&#39; : Used for tracking wavefronts.
+        
+          - &#39;contour&#39; : Adds contour lines beneath the surface at each frame.
+          - &#39;front&#39; : Used for tracking wavefronts.
 
     Returns
     -------
@@ -8508,18 +8859,24 @@ derivatives with their spectral approximations computed via FFT. The dealiasing 
 ensures numerical stability by removing high-frequency components that could lead
 to aliasing errors.</p>
 <h2 id="parameters">Parameters</h2>
-<p>u (numpy.ndarray): Current solution array on the spatial grid.
-is_v (bool): If True, evaluates nonlinear terms for the velocity field v instead of u.</p>
+<dl>
+<dt><strong><code>u</code></strong> :&ensp;<code>numpy.ndarray</code></dt>
+<dd>Current solution array on the spatial grid.</dd>
+<dt><strong><code>is_v</code></strong> :&ensp;<code>bool</code></dt>
+<dd>If True, evaluates nonlinear terms for the velocity field v instead of u.</dd>
+</dl>
 <h2 id="returns">Returns</h2>
 <dl>
 <dt><code>numpy.ndarray</code></dt>
 <dd>Array representing the contribution of nonlinear terms multiplied by dt.</dd>
 </dl>
-<p>Notes:
-- In 1D, computes ∂ₓu via FFT and substitutes any derivative term in the nonlinear expressions.
-- In 2D, computes ∂ₓu and ∂ᵧu via FFT and performs similar substitutions.
-- Uses lambdify to evaluate symbolic nonlinear expressions numerically.
-- Derivatives are replaced symbolically with 'u_x' and 'u_y' before evaluation.</p></div>
+<p>Notes:</p>
+<ul>
+<li>In 1D, computes ∂ₓu via FFT and substitutes any derivative term in the nonlinear expressions.</li>
+<li>In 2D, computes ∂ₓu and ∂ᵧu via FFT and performs similar substitutions.</li>
+<li>Uses lambdify to evaluate symbolic nonlinear expressions numerically.</li>
+<li>Derivatives are replaced symbolically with 'u_x' and 'u_y' before evaluation.</li>
+</ul></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -8533,14 +8890,18 @@ is_v (bool): If True, evaluates nonlinear terms for the velocity field v instead
     ensures numerical stability by removing high-frequency components that could lead 
     to aliasing errors.
 
-    Parameters:
-        u (numpy.ndarray): Current solution array on the spatial grid.
-        is_v (bool): If True, evaluates nonlinear terms for the velocity field v instead of u.
+    Parameters
+    ----------
+    u : numpy.ndarray
+        Current solution array on the spatial grid.
+    is_v : bool
+        If True, evaluates nonlinear terms for the velocity field v instead of u.
 
     Returns:
         numpy.ndarray: Array representing the contribution of nonlinear terms multiplied by dt.
 
     Notes:
+    
     - In 1D, computes ∂ₓu via FFT and substitutes any derivative term in the nonlinear expressions.
     - In 2D, computes ∂ₓu and ∂ᵧu via FFT and performs similar substitutions.
     - Uses lambdify to evaluate symbolic nonlinear expressions numerically.
@@ -8605,23 +8966,27 @@ is_v (bool): If True, evaluates nonlinear terms for the velocity field v instead
 </code></dt>
 <dd>
 <div class="desc"><p>Apply the pseudo-differential operator to the input field u.</p>
-<p>This method dispatches the application of the pseudo-differential operator based on:
-- Whether the symbol is spatially dependent (x/y)
-- The boundary condition in use (periodic or dirichlet)</p>
-<p>Supported operations:
-- Constant-coefficient symbols: applied via Fourier multiplication.
-- Spatially varying symbols: applied via Kohn–Nirenberg quantization.
-- Dirichlet boundary conditions: handled with non-periodic convolution-like quantization.</p>
-<p>Dispatch Logic:
-if not self.is_spatial:
-u ↦ Op(p)(D) ⋅ u = 𝓕⁻¹[ p(ξ) ⋅ 𝓕(u) ]
-elif periodic:
-u ↦ Op(p)(x,D) ⋅ u ≈ ∫ eᶦˣᶿ p(x, ξ) 𝓕(u)(ξ) dξ
-elif dirichlet:
-u ↦ Op(p)(x,y,D) ⋅ u ≈ non-periodic extension + convolution</p>
+<p>This method dispatches the application of the pseudo-differential operator based on:</p>
+<ul>
+<li>Whether the symbol is spatially dependent (x/y)</li>
+<li>The boundary condition in use (periodic or dirichlet)</li>
+</ul>
+<p>Supported operations:</p>
+<ul>
+<li>Constant-coefficient symbols: applied via Fourier multiplication.</li>
+<li>Spatially varying symbols: applied via Kohn–Nirenberg quantization.</li>
+<li>Dirichlet boundary conditions: handled with non-periodic convolution-like quantization.</li>
+</ul>
+<p>Dispatch Logic:</p>
+<p>if not self.is_spatial: u ↦ Op(p)(D) ⋅ u = 𝓕⁻¹[ p(ξ) ⋅ 𝓕(u) ]</p>
+<p>elif periodic: u ↦ Op(p)(x,D) ⋅ u ≈ ∫ eᶦˣᶿ p(x, ξ) 𝓕(u)(ξ) dξ based of FFT (quicker)</p>
+<p>elif dirichlet: u ↦ Op(p)(x,D) ⋅ u ≈ u ≈ ∫ eᶦˣᶿ p(x, ξ) 𝓕(u)(ξ) dξ (slower)</p>
 <h2 id="parameters">Parameters</h2>
-<p>u (np.ndarray): Input field to which the operator is applied.
-Should be 1D or 2D depending on the problem dimension.</p>
+<dl>
+<dt><strong><code>u</code></strong> :&ensp;<code>np.ndarray </code></dt>
+<dd>Input field to which the operator is applied.
+Should be 1D or 2D depending on the problem dimension.</dd>
+</dl>
 <h2 id="returns">Returns</h2>
 <dl>
 <dt><code>np.ndarray</code></dt>
@@ -8641,25 +9006,26 @@ Should be 1D or 2D depending on the problem dimension.</p>
     Apply the pseudo-differential operator to the input field u.
 
     This method dispatches the application of the pseudo-differential operator based on:
+    
     - Whether the symbol is spatially dependent (x/y)
     - The boundary condition in use (periodic or dirichlet)
 
     Supported operations:
+    
     - Constant-coefficient symbols: applied via Fourier multiplication.
     - Spatially varying symbols: applied via Kohn–Nirenberg quantization.
     - Dirichlet boundary conditions: handled with non-periodic convolution-like quantization.
 
-    Dispatch Logic:
-    if not self.is_spatial:
-        u ↦ Op(p)(D) ⋅ u = 𝓕⁻¹[ p(ξ) ⋅ 𝓕(u) ]
-    elif periodic:
-        u ↦ Op(p)(x,D) ⋅ u ≈ ∫ eᶦˣᶿ p(x, ξ) 𝓕(u)(ξ) dξ
-    elif dirichlet:
-        u ↦ Op(p)(x,y,D) ⋅ u ≈ non-periodic extension + convolution
+    Dispatch Logic:\n
+    if not self.is_spatial: u ↦ Op(p)(D) ⋅ u = 𝓕⁻¹[ p(ξ) ⋅ 𝓕(u) ]\n
+    elif periodic: u ↦ Op(p)(x,D) ⋅ u ≈ ∫ eᶦˣᶿ p(x, ξ) 𝓕(u)(ξ) dξ based of FFT (quicker)\n
+    elif dirichlet: u ↦ Op(p)(x,D) ⋅ u ≈ u ≈ ∫ eᶦˣᶿ p(x, ξ) 𝓕(u)(ξ) dξ (slower)\n
 
-    Parameters:
-        u (np.ndarray): Input field to which the operator is applied.
-                        Should be 1D or 2D depending on the problem dimension.
+    Parameters
+    ----------
+    u : np.ndarray 
+        Input field to which the operator is applied.
+        Should be 1D or 2D depending on the problem dimension.
 
     Returns:
         np.ndarray: Result of applying the pseudo-differential operator to u.
@@ -8691,12 +9057,16 @@ multiplication operator. It performs the operation:</p>
 - 𝓕 denotes the forward Fourier transform
 - 𝓕⁻¹ denotes the inverse Fourier transform</p>
 <p>The dealiasing mask is applied before returning to physical space.</p>
-<h2 id="parameters">Parameters:</h2>
-<p>u : numpy.ndarray
-Input function in physical space (real-valued or complex-valued)</p>
-<h2 id="returns">Returns:</h2>
-<p>numpy.ndarray
-Result of applying the pseudo-differential operator to u, same shape as input</p></div>
+<h2 id="parameters">Parameters</h2>
+<dl>
+<dt><strong><code>u</code></strong> :&ensp;<code>np.ndarray</code></dt>
+<dd>Input function in physical space (real-valued or complex-valued)</dd>
+</dl>
+<h2 id="returns">Returns</h2>
+<dl>
+<dt><code>np.ndarray </code></dt>
+<dd>Result of applying the pseudo-differential operator to u, same shape as input</dd>
+</dl></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -8717,15 +9087,13 @@ Result of applying the pseudo-differential operator to u, same shape as input</p
 
     The dealiasing mask is applied before returning to physical space.
     
-    Parameters:
-    -----------
-    u : numpy.ndarray
+    Parameters
+    ----------
+    u : np.ndarray
         Input function in physical space (real-valued or complex-valued)
 
     Returns:
-    --------
-    numpy.ndarray
-        Result of applying the pseudo-differential operator to u, same shape as input
+        np.ndarray : Result of applying the pseudo-differential operator to u, same shape as input
     &#34;&#34;&#34;
     u_hat = self.fft(u)
     u_hat *= -self.combined_symbol
@@ -8742,7 +9110,10 @@ Result of applying the pseudo-differential operator to u, same shape as input</p
 computed from all psiOp terms in the equation. It uses the fast Fourier transform (FFT) for
 efficiency in periodic domains.</p>
 <h2 id="parameters">Parameters</h2>
-<p>u (np.ndarray): Input function in real space to which the operator is applied.</p>
+<dl>
+<dt><strong><code>u</code></strong> :&ensp;<code>np.ndarray</code></dt>
+<dd>Input function in real space to which the operator is applied.</dd>
+</dl>
 <h2 id="returns">Returns</h2>
 <dl>
 <dt><code>np.ndarray</code></dt>
@@ -8771,8 +9142,10 @@ efficiency in periodic domains.</p>
     computed from all psiOp terms in the equation. It uses the fast Fourier transform (FFT) for
     efficiency in periodic domains.
 
-    Parameters:
-        u (np.ndarray): Input function in real space to which the operator is applied.
+    Parameters
+    ----------
+    u : np.ndarray
+        Input function in real space to which the operator is applied.
 
     Returns:
         np.ndarray: Resulting function after applying the pseudo-differential operator.
@@ -8802,7 +9175,10 @@ and frequency grids to evaluate the operator symbol p(x, ξ).</p>
 <p>The operator symbol p(x, ξ) is extracted from the PDE and evaluated numerically using
 <code>_total_symbol_expr</code> and <code>_build_symbol_func</code>.</p>
 <h2 id="parameters">Parameters</h2>
-<p>u (np.ndarray): Input function (real space) to which the operator is applied.</p>
+<dl>
+<dt><strong><code>u</code></strong> :&ensp;<code>np.ndarray</code></dt>
+<dd>Input function (real space) to which the operator is applied.</dd>
+</dl>
 <h2 id="returns">Returns</h2>
 <dl>
 <dt><code>np.ndarray</code></dt>
@@ -8829,8 +9205,10 @@ and frequency grids to evaluate the operator symbol p(x, ξ).</p>
     The operator symbol p(x, ξ) is extracted from the PDE and evaluated numerically using 
     `_total_symbol_expr` and `_build_symbol_func`.
 
-    Parameters:
-        u (np.ndarray): Input function (real space) to which the operator is applied.
+    Parameters
+    ----------
+    u : np.ndarray
+        Input function (real space) to which the operator is applied.
 
     Returns:
         np.ndarray: Result of applying Op(p) to u in real space.
@@ -8857,15 +9235,21 @@ and frequency grids to evaluate the operator symbol p(x, ξ).</p>
 a callable NumPy-compatible function. The function accepts spatial and frequency variables
 depending on the dimensionality of the problem.</p>
 <h2 id="parameters">Parameters</h2>
-<p>expr (sympy.Expr): A SymPy expression representing the symbol of the pseudo-differential operator.
-It may depend on spatial variables (x, y) and frequency variables (xi, eta).</p>
+<dl>
+<dt><strong><code>expr</code></strong> :&ensp;<code>sympy expression</code></dt>
+<dd>A SymPy expression representing the symbol of the pseudo-differential operator. It may depend on spatial variables (x, y) and frequency variables (xi, eta).</dd>
+</dl>
 <h2 id="returns">Returns</h2>
 <dl>
-<dt><code>function</code></dt>
-<dd>A lambdified function that takes:
-- In 1D: <code>(x, xi)</code> — spatial coordinate and frequency.
-- In 2D: <code>(x, y, xi, eta)</code> — spatial coordinates and frequencies.
-Returns a NumPy array of evaluated symbol values over input grids.</dd>
+<dt><code>function </code></dt>
+<dd>
+<p>A lambdified function that takes:</p>
+<ul>
+<li>In 1D: <code>(x, xi)</code> — spatial coordinate and frequency.</li>
+<li>In 2D: <code>(x, y, xi, eta)</code> — spatial coordinates and frequencies.</li>
+</ul>
+<p>Returns a NumPy array of evaluated symbol values over input grids.</p>
+</dd>
 </dl>
 <h2 id="notes">Notes</h2>
 <ul>
@@ -8885,14 +9269,17 @@ Returns a NumPy array of evaluated symbol values over input grids.</dd>
     a callable NumPy-compatible function. The function accepts spatial and frequency variables
     depending on the dimensionality of the problem.
 
-    Parameters:
-        expr (sympy.Expr): A SymPy expression representing the symbol of the pseudo-differential operator.
-                            It may depend on spatial variables (x, y) and frequency variables (xi, eta).
+    Parameters
+    ----------
+    expr : sympy expression
+        A SymPy expression representing the symbol of the pseudo-differential operator. It may depend on spatial variables (x, y) and frequency variables (xi, eta).
 
     Returns:
-        function: A lambdified function that takes:
+        function : A lambdified function that takes:
+        
             - In 1D: `(x, xi)` — spatial coordinate and frequency.
             - In 2D: `(x, y, xi, eta)` — spatial coordinates and frequencies.
+            
           Returns a NumPy array of evaluated symbol values over input grids.
 
     Notes:
@@ -8919,15 +9306,18 @@ condition derived from the maximum wave propagation speed in the system. It supp
 1D and 2D problems, with or without a symbolic dispersion relation ω(k).</p>
 <p>The CFL condition ensures that information does not propagate further than one grid cell
 per time step. A safety factor of 0.5 is applied by default to ensure robustness.</p>
-<p>Notes:
-- In 1D, the group velocity v₉(k) = dω/dk is used to compute the maximum wave speed.
-- In 2D, the x- and y-directional group velocities are evaluated independently.
-- If no dispersion relation is available, the imaginary part of the linear operator L(k)
-is used as an approximation for wave speed.</p>
-<p>Raises:
-- NotImplementedError: If the spatial dimension is not 1D or 2D.</p>
-<p>Prints:
-- Warning message if the current time step dt exceeds the CFL-stable limit.</p></div>
+<p>Notes:</p>
+<ul>
+<li>In 1D, the group velocity v₉(k) = dω/dk is used to compute the maximum wave speed.</li>
+<li>In 2D, the x- and y-directional group velocities are evaluated independently.</li>
+<li>If no dispersion relation is available, the imaginary part of the linear operator L(k)
+is used as an approximation for wave speed.</li>
+</ul>
+<h2 id="raises">Raises:</h2>
+<p>NotImplementedError:
+If the spatial dimension is not 1D or 2D.</p>
+<h2 id="prints">Prints:</h2>
+<p>Warning message if the current time step dt exceeds the CFL-stable limit.</p></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -8945,16 +9335,20 @@ is used as an approximation for wave speed.</p>
     per time step. A safety factor of 0.5 is applied by default to ensure robustness.
 
     Notes:
+    
     - In 1D, the group velocity v₉(k) = dω/dk is used to compute the maximum wave speed.
     - In 2D, the x- and y-directional group velocities are evaluated independently.
     - If no dispersion relation is available, the imaginary part of the linear operator L(k) 
       is used as an approximation for wave speed.
 
     Raises:
-    - NotImplementedError: If the spatial dimension is not 1D or 2D.
+    -------
+    NotImplementedError: 
+        If the spatial dimension is not 1D or 2D.
 
     Prints:
-    - Warning message if the current time step dt exceeds the CFL-stable limit.
+    -------
+    Warning message if the current time step dt exceeds the CFL-stable limit.
     &#34;&#34;&#34;
     print(&#34;\n*****************&#34;)
     print(&#34;* CFL condition *&#34;)
@@ -9007,11 +9401,10 @@ is used as an approximation for wave speed.</p>
 <span>def <span class="ident">check_symbol_conditions</span></span>(<span>self, k_range=None, verbose=True)</span>
 </code></dt>
 <dd>
-<div class="desc"><p>Check strict analytic conditions on the linear symbol self.L_symbolic:</p>
-<pre><code>This method evaluates three key properties of the Fourier multiplier 
+<div class="desc"><p>Check strict analytic conditions on the linear symbol self.L_symbolic:
+This method evaluates three key properties of the Fourier multiplier
 symbol a(k) = self.L(k), which are crucial for well-posedness, stability,
-and numerical efficiency. The checks apply to both 1D and 2D cases.
-</code></pre>
+and numerical efficiency. The checks apply to both 1D and 2D cases.</p>
 <h2 id="conditions-checked">Conditions checked:</h2>
 <ol>
 <li>
@@ -9028,13 +9421,15 @@ Ensures that the symbol does not grow too rapidly with frequency,
 which would otherwise cause numerical instability or unphysical amplification.</p>
 </li>
 </ol>
-<h2 id="parameters">Parameters:</h2>
-<p>k_range : tuple or None, optional
-Specifies the range of frequencies to test in the form (k_min, k_max, N).
+<h2 id="parameters">Parameters</h2>
+<dl>
+<dt><strong><code>k_range</code></strong> :&ensp;<code>tuple</code> or <code>None</code>, optional</dt>
+<dd>Specifies the range of frequencies to test in the form (k_min, k_max, N).
 If None, defaults are used: [-10, 10] with 500 points in 1D, or [-10, 10]
-with 100 points per axis in 2D.</p>
-<p>verbose : bool, default=True
-If True, prints detailed results of each condition check.</p>
+with 100 points per axis in 2D.</dd>
+<dt><strong><code>verbose</code></strong> :&ensp;<code>bool</code>, default=<code>True</code></dt>
+<dd>If True, prints detailed results of each condition check.</dd>
+</dl>
 <h2 id="returns">Returns:</h2>
 <p>None
 Output is printed directly to the console for interpretability.</p>
@@ -9055,7 +9450,6 @@ plot_symbol : Visualizes the symbol's behavior over the frequency domain.</p></d
 <pre><code class="python">def check_symbol_conditions(self, k_range=None, verbose=True):
     &#34;&#34;&#34;
     Check strict analytic conditions on the linear symbol self.L_symbolic:
-    
         This method evaluates three key properties of the Fourier multiplier 
         symbol a(k) = self.L(k), which are crucial for well-posedness, stability,
         and numerical efficiency. The checks apply to both 1D and 2D cases.
@@ -9072,8 +9466,8 @@ plot_symbol : Visualizes the symbol's behavior over the frequency domain.</p></d
        Ensures that the symbol does not grow too rapidly with frequency, 
        which would otherwise cause numerical instability or unphysical amplification.
 
-    Parameters:
-    -----------
+    Parameters
+    ----------
     k_range : tuple or None, optional
         Specifies the range of frequencies to test in the form (k_min, k_max, N).
         If None, defaults are used: [-10, 10] with 500 points in 1D, or [-10, 10] 
@@ -9177,13 +9571,17 @@ where L is the linear operator associated with the spatial part of the PDE,
 and L¹ᐟ² denotes its square root in Fourier space.</p>
 <p>This method supports both 1D and 2D problems and is only meaningful when
 self.temporal_order == 2 (second-order time derivative).</p>
-<p>Returns:
-- float or None: Total energy at current time step. Returns None if the
-temporal order is not 2 or if no valid velocity data (v_prev) is available.</p>
-<p>Notes:
-- Uses FFT-based spectral differentiation to compute the spatial contributions.
-- Assumes periodic boundary conditions.
-- Handles both real and complex-valued solutions.</p></div>
+<h2 id="returns">Returns</h2>
+<dl>
+<dt><code>float</code> or <code>None:</code></dt>
+<dd>Total energy at current time step. Returns None if the temporal order is not 2 or if no valid velocity data (v_prev) is available.</dd>
+</dl>
+<h2 id="notes">Notes</h2>
+<ul>
+<li>Uses FFT-based spectral differentiation to compute the spatial contributions.</li>
+<li>Assumes periodic boundary conditions.</li>
+<li>Handles both real and complex-valued solutions.</li>
+</ul></div>
 <details class="source">
 <summary>
 <span>Expand source code</span>
@@ -9199,11 +9597,13 @@ temporal order is not 2 or if no valid velocity data (v_prev) is available.</p>
     This method supports both 1D and 2D problems and is only meaningful when 
     self.temporal_order == 2 (second-order time derivative).
 
-    Returns:
-    - float or None: Total energy at current time step. Returns None if the 
-      temporal order is not 2 or if no valid velocity data (v_prev) is available.
+    Returns
+    -------
+    float or None: 
+        Total energy at current time step. Returns None if the temporal order is not 2 or if no valid velocity data (v_prev) is available.
 
-    Notes:
+    Notes
+    -----
     - Uses FFT-based spectral differentiation to compute the spatial contributions.
     - Assumes periodic boundary conditions.
     - Handles both real and complex-valued solutions.
@@ -9266,16 +9666,18 @@ pseudo-differential terms.</p>
 <li>Build the numerical function L(k) via lambdify.</li>
 </ol>
 <h2 id="sets">Sets:</h2>
-<p>self.L_symbolic : sympy.Expr
-Symbolic form of L(k).
-self.L : callable
-Numerical function of L(kx[, ky]).
-self.omega : callable or None
-Frequency root ω(k), if available.
-self.temporal_order : int
-Order of time derivatives detected.
-self.psi_ops : list of (coeff, PseudoDifferentialOperator)
-Pseudo-differential terms present in the equation.</p>
+<ul>
+<li>self.L_symbolic : sympy.Expr
+Symbolic form of L(k).</li>
+<li>self.L : callable
+Numerical function of L(kx[, ky]).</li>
+<li>self.omega : callable or None
+Frequency root ω(k), if available.</li>
+<li>self.temporal_order : int
+Order of time derivatives detected.</li>
+<li>self.psi_ops : list of (coeff, PseudoDifferentialOperator)
+Pseudo-differential terms present in the equation.</li>
+</ul>
 <h2 id="raises">Raises:</h2>
 <p>ValueError if the dimension is unsupported or the dispersion relation fails.</p></div>
 <details class="source">
@@ -9303,15 +9705,15 @@ Pseudo-differential terms present in the equation.</p>
 
     Sets:
     -----
-    self.L_symbolic : sympy.Expr
+    - self.L_symbolic : sympy.Expr
         Symbolic form of L(k).
-    self.L : callable
+    - self.L : callable
         Numerical function of L(kx[, ky]).
-    self.omega : callable or None
+    - self.omega : callable or None
         Frequency root ω(k), if available.
-    self.temporal_order : int
+    - self.temporal_order : int
         Order of time derivatives detected.
-    self.psi_ops : list of (coeff, PseudoDifferentialOperator)
+    - self.psi_ops : list of (coeff, PseudoDifferentialOperator)
         Pseudo-differential terms present in the equation.
 
     Raises:
@@ -10114,21 +10516,22 @@ expands it, and classifies each term into one of the following categories:</p>
 <li>Source terms (independent of u)</li>
 <li>Pseudo-differential operators (psiOp)</li>
 </ul>
-<h2 id="args">Args</h2>
-<dl>
-<dt><strong><code>equation</code></strong> :&ensp;<code>sympy.Eq</code></dt>
-<dd>The partial differential equation to be analyzed.
-Can be provided as an Eq object or a sympy expression.</dd>
-</dl>
+<p>Parameters
+equation (sympy.Eq): The partial differential equation to be analyzed.
+Can be provided as an Eq object or a sympy expression.</p>
 <h2 id="returns">Returns</h2>
 <dl>
 <dt><code>tuple</code></dt>
-<dd>A 5-tuple containing:
-- linear_terms (dict): Mapping from derivative/function to coefficient.
-- nonlinear_terms (list): List of terms classified as nonlinear.
-- symbol_terms (list): List of (coefficient, symbolic operator) pairs.
-- source_terms (list): List of terms independent of the unknown function.
-- pseudo_terms (list): List of (coefficient, pseudo-differential symbol) pairs.</dd>
+<dd>
+<p>A 5-tuple containing:</p>
+<ul>
+<li>linear_terms (dict): Mapping from derivative/function to coefficient.</li>
+<li>nonlinear_terms (list): List of terms classified as nonlinear.</li>
+<li>symbol_terms (list): List of (coefficient, symbolic operator) pairs.</li>
+<li>source_terms (list): List of terms independent of the unknown function.</li>
+<li>pseudo_terms (list): List of (coefficient, pseudo-differential symbol) pairs.</li>
+</ul>
+</dd>
 </dl>
 <h2 id="notes">Notes</h2>
 <ul>
@@ -10161,12 +10564,13 @@ a time derivative are allowed; other linear terms and symbolic operators
     - Source terms (independent of u)
     - Pseudo-differential operators (psiOp)
 
-    Args:
+    Parameters
         equation (sympy.Eq): The partial differential equation to be analyzed. 
                              Can be provided as an Eq object or a sympy expression.
 
     Returns:
         tuple: A 5-tuple containing:
+        
             - linear_terms (dict): Mapping from derivative/function to coefficient.
             - nonlinear_terms (list): List of terms classified as nonlinear.
             - symbol_terms (list): List of (coefficient, symbolic operator) pairs.
@@ -10390,26 +10794,28 @@ either as a function of a single wavenumber k (1D), or two wavenumbers
 kx and ky (2D). The user can choose to display the real part, imaginary part,
 or absolute value of the symbol.</p>
 <h2 id="parameters">Parameters</h2>
-<p>component : str {'abs', 're', 'im'}
-Component of the symbol to visualize:
-- 'abs' : absolute value |a(k)|
-- 're'
-: real part Re[a(k)]
-- 'im'
-: imaginary part Im[a(k)]
-k_range : tuple (kmin, kmax, N), optional
-Wavenumber range for evaluation:
-- kmin: minimum wavenumber
+<dl>
+<dt><strong><code>component</code></strong> :&ensp;<code>str {'abs', 're', 'im'}</code></dt>
+<dd>Component of the symbol to visualize:<pre><code>- 'abs' : absolute value |a(k)|
+- 're'  : real part Re[a(k)]
+- 'im'  : imaginary part Im[a(k)]
+</code></pre>
+</dd>
+<dt><strong><code>k_range</code></strong> :&ensp;<code>tuple (kmin, kmax, N)</code>, optional</dt>
+<dd>
+<p>Wavenumber range for evaluation:</p>
+<pre><code>- kmin: minimum wavenumber
 - kmax: maximum wavenumber
 - N: number of sampling points
-If None, defaults to [-10, 10] with high resolution.
-cmap : str, optional
-Colormap used for 2D surface plots. Default is 'viridis'.</p>
-<h2 id="raises">Raises</h2>
-<dl>
-<dt><code>ValueError</code></dt>
-<dd>If the spatial dimension is not 1D or 2D.</dd>
+</code></pre>
+<p>If None, defaults to [-10, 10] with high resolution.</p>
+</dd>
+<dt><strong><code>cmap</code></strong> :&ensp;<code>str</code>, optional</dt>
+<dd>Colormap used for 2D surface plots. Default is 'viridis'.</dd>
 </dl>
+<h2 id="raises">Raises</h2>
+<pre><code>ValueError: If the spatial dimension is not 1D or 2D.
+</code></pre>
 <h2 id="notes">Notes</h2>
 <ul>
 <li>In 1D, the symbol is plotted using a standard 2D line plot.</li>
@@ -10429,22 +10835,28 @@ Colormap used for 2D surface plots. Default is 'viridis'.</p>
     kx and ky (2D). The user can choose to display the real part, imaginary part, 
     or absolute value of the symbol.
 
-    Parameters:
-        component : str {&#39;abs&#39;, &#39;re&#39;, &#39;im&#39;}
-            Component of the symbol to visualize:
-                - &#39;abs&#39; : absolute value |a(k)|
-                - &#39;re&#39;  : real part Re[a(k)]
-                - &#39;im&#39;  : imaginary part Im[a(k)]
-        k_range : tuple (kmin, kmax, N), optional
-            Wavenumber range for evaluation:
-                - kmin: minimum wavenumber
-                - kmax: maximum wavenumber
-                - N: number of sampling points
-            If None, defaults to [-10, 10] with high resolution.
-        cmap : str, optional
-            Colormap used for 2D surface plots. Default is &#39;viridis&#39;.
+    Parameters
+    ----------
+    component : str {&#39;abs&#39;, &#39;re&#39;, &#39;im&#39;}
+        Component of the symbol to visualize:
+        
+            - &#39;abs&#39; : absolute value |a(k)|
+            - &#39;re&#39;  : real part Re[a(k)]
+            - &#39;im&#39;  : imaginary part Im[a(k)]
+            
+    k_range : tuple (kmin, kmax, N), optional
+        Wavenumber range for evaluation:
+        
+            - kmin: minimum wavenumber
+            - kmax: maximum wavenumber
+            - N: number of sampling points
+            
+        If None, defaults to [-10, 10] with high resolution.
+    cmap : str, optional
+        Colormap used for 2D surface plots. Default is &#39;viridis&#39;.
 
-    Raises:
+    Raises
+    ------
         ValueError: If the spatial dimension is not 1D or 2D.
 
     Notes:
@@ -10777,28 +11189,30 @@ The spatial domain is centered at zero: [-Lx/2, Lx/2].</p>
 <dd>Number of grid points in the x-direction.</dd>
 </dl>
 <h2 id="attributes-set">Attributes Set</h2>
-<p>self.Lx : float
-Size of the spatial domain.
-self.Nx : int
-Number of spatial points.
-self.x_grid : np.ndarray
-1D array of spatial coordinates.
-self.X : np.ndarray
-Alias to <code>self.x_grid</code>, used in physical space computations.
-self.kx : np.ndarray
-Array of wavenumbers corresponding to the Fourier transform.
-self.KX : np.ndarray
-Alias to <code>self.kx</code>, used in frequency space computations.
-self.dealiasing_mask : np.ndarray
-Boolean mask used to suppress aliased frequencies during nonlinear calculations.
-self.exp_L : np.ndarray
-Exponential of the linear operator scaled by time step: exp(L(k) · dt).
-self.omega_val : np.ndarray
-Frequency values ω(k) = Re[√(L(k))] used in second-order time stepping.
-self.cos_omega_dt, self.sin_omega_dt : np.ndarray
-Cosine and sine of ω(k)·dt for dispersive propagation.
-self.inv_omega : np.ndarray
-Inverse of ω(k), used to avoid division-by-zero in time stepping.</p>
+<ul>
+<li>self.Lx : float
+Size of the spatial domain.</li>
+<li>self.Nx : int
+Number of spatial points.</li>
+<li>self.x_grid : np.ndarray
+1D array of spatial coordinates.</li>
+<li>self.X : np.ndarray
+Alias to <code>self.x_grid</code>, used in physical space computations.</li>
+<li>self.kx : np.ndarray
+Array of wavenumbers corresponding to the Fourier transform.</li>
+<li>self.KX : np.ndarray
+Alias to <code>self.kx</code>, used in frequency space computations.</li>
+<li>self.dealiasing_mask : np.ndarray
+Boolean mask used to suppress aliased frequencies during nonlinear calculations.</li>
+<li>self.exp_L : np.ndarray
+Exponential of the linear operator scaled by time step: exp(L(k) · dt).</li>
+<li>self.omega_val : np.ndarray
+Frequency values ω(k) = Re[√(L(k))] used in second-order time stepping.</li>
+<li>self.cos_omega_dt, self.sin_omega_dt : np.ndarray
+Cosine and sine of ω(k)·dt for dispersive propagation.</li>
+<li>self.inv_omega : np.ndarray
+Inverse of ω(k), used to avoid division-by-zero in time stepping.</li>
+</ul>
 <h2 id="notes">Notes</h2>
 <ul>
 <li>Frequencies are computed using <code>scipy.fft.fftfreq</code> and then shifted to center zero frequency.</li>
@@ -10838,27 +11252,27 @@ Inverse of ω(k), used to avoid division-by-zero in time stepping.</p>
 
     Attributes Set
     --------------
-    self.Lx : float
+    - self.Lx : float
         Size of the spatial domain.
-    self.Nx : int
+    - self.Nx : int
         Number of spatial points.
-    self.x_grid : np.ndarray
+    - self.x_grid : np.ndarray
         1D array of spatial coordinates.
-    self.X : np.ndarray
+    - self.X : np.ndarray
         Alias to `self.x_grid`, used in physical space computations.
-    self.kx : np.ndarray
+    - self.kx : np.ndarray
         Array of wavenumbers corresponding to the Fourier transform.
-    self.KX : np.ndarray
+    - self.KX : np.ndarray
         Alias to `self.kx`, used in frequency space computations.
-    self.dealiasing_mask : np.ndarray
+    - self.dealiasing_mask : np.ndarray
         Boolean mask used to suppress aliased frequencies during nonlinear calculations.
-    self.exp_L : np.ndarray
+    - self.exp_L : np.ndarray
         Exponential of the linear operator scaled by time step: exp(L(k) · dt).
-    self.omega_val : np.ndarray
+    - self.omega_val : np.ndarray
         Frequency values ω(k) = Re[√(L(k))] used in second-order time stepping.
-    self.cos_omega_dt, self.sin_omega_dt : np.ndarray
+    - self.cos_omega_dt, self.sin_omega_dt : np.ndarray
         Cosine and sine of ω(k)·dt for dispersive propagation.
-    self.inv_omega : np.ndarray
+    - self.inv_omega : np.ndarray
         Inverse of ω(k), used to avoid division-by-zero in time stepping.
 
     Notes
@@ -10916,28 +11330,30 @@ The spatial domain is centered at zero: [-Lx/2, Lx/2] × [-Ly/2, Ly/2].</p>
 <dd>Number of grid points along the y-direction.</dd>
 </dl>
 <h2 id="attributes-set">Attributes Set</h2>
-<p>self.Lx, self.Ly : float
-Size of the spatial domain in each direction.
-self.Nx, self.Ny : int
-Number of spatial points in each direction.
-self.x_grid, self.y_grid : np.ndarray
-1D arrays of spatial coordinates in x and y directions.
-self.X, self.Y : np.ndarray
-2D meshgrids of spatial coordinates for physical space computations.
-self.kx, self.ky : np.ndarray
-Arrays of wavenumbers corresponding to Fourier transforms in x and y directions.
-self.KX, self.KY : np.ndarray
-Meshgrids of wavenumbers used in frequency space computations.
-self.dealiasing_mask : np.ndarray
-Boolean mask used to suppress aliased frequencies during nonlinear calculations.
-self.exp_L : np.ndarray
-Exponential of the linear operator scaled by time step: exp(L(kx, ky) · dt).
-self.omega_val : np.ndarray
-Frequency values ω(kx, ky) = Re[√(L(kx, ky))] used in second-order time stepping.
-self.cos_omega_dt, self.sin_omega_dt : np.ndarray
-Cosine and sine of ω(kx, ky)·dt for dispersive propagation.
-self.inv_omega : np.ndarray
-Inverse of ω(kx, ky), used to avoid division-by-zero in time stepping.</p>
+<ul>
+<li>self.Lx, self.Ly : float
+Size of the spatial domain in each direction.</li>
+<li>self.Nx, self.Ny : int
+Number of spatial points in each direction.</li>
+<li>self.x_grid, self.y_grid : np.ndarray
+1D arrays of spatial coordinates in x and y directions.</li>
+<li>self.X, self.Y : np.ndarray
+2D meshgrids of spatial coordinates for physical space computations.</li>
+<li>self.kx, self.ky : np.ndarray
+Arrays of wavenumbers corresponding to Fourier transforms in x and y directions.</li>
+<li>self.KX, self.KY : np.ndarray
+Meshgrids of wavenumbers used in frequency space computations.</li>
+<li>self.dealiasing_mask : np.ndarray
+Boolean mask used to suppress aliased frequencies during nonlinear calculations.</li>
+<li>self.exp_L : np.ndarray
+Exponential of the linear operator scaled by time step: exp(L(kx, ky) · dt).</li>
+<li>self.omega_val : np.ndarray
+Frequency values ω(kx, ky) = Re[√(L(kx, ky))] used in second-order time stepping.</li>
+<li>self.cos_omega_dt, self.sin_omega_dt : np.ndarray
+Cosine and sine of ω(kx, ky)·dt for dispersive propagation.</li>
+<li>self.inv_omega : np.ndarray
+Inverse of ω(kx, ky), used to avoid division-by-zero in time stepping.</li>
+</ul>
 <h2 id="notes">Notes</h2>
 <ul>
 <li>Frequencies are computed using <code>scipy.fft.fftfreq</code> and then shifted to center zero frequency.</li>
@@ -10981,27 +11397,27 @@ Inverse of ω(kx, ky), used to avoid division-by-zero in time stepping.</p>
 
     Attributes Set
     --------------
-    self.Lx, self.Ly : float
+    - self.Lx, self.Ly : float
         Size of the spatial domain in each direction.
-    self.Nx, self.Ny : int
+    - self.Nx, self.Ny : int
         Number of spatial points in each direction.
-    self.x_grid, self.y_grid : np.ndarray
+    - self.x_grid, self.y_grid : np.ndarray
         1D arrays of spatial coordinates in x and y directions.
-    self.X, self.Y : np.ndarray
+    - self.X, self.Y : np.ndarray
         2D meshgrids of spatial coordinates for physical space computations.
-    self.kx, self.ky : np.ndarray
+    - self.kx, self.ky : np.ndarray
         Arrays of wavenumbers corresponding to Fourier transforms in x and y directions.
-    self.KX, self.KY : np.ndarray
+    - self.KX, self.KY : np.ndarray
         Meshgrids of wavenumbers used in frequency space computations.
-    self.dealiasing_mask : np.ndarray
+    - self.dealiasing_mask : np.ndarray
         Boolean mask used to suppress aliased frequencies during nonlinear calculations.
-    self.exp_L : np.ndarray
+    - self.exp_L : np.ndarray
         Exponential of the linear operator scaled by time step: exp(L(kx, ky) · dt).
-    self.omega_val : np.ndarray
+    - self.omega_val : np.ndarray
         Frequency values ω(kx, ky) = Re[√(L(kx, ky))] used in second-order time stepping.
-    self.cos_omega_dt, self.sin_omega_dt : np.ndarray
+    - self.cos_omega_dt, self.sin_omega_dt : np.ndarray
         Cosine and sine of ω(kx, ky)·dt for dispersive propagation.
-    self.inv_omega : np.ndarray
+    - self.inv_omega : np.ndarray
         Inverse of ω(kx, ky), used to avoid division-by-zero in time stepping.
 
     Notes
@@ -11059,14 +11475,16 @@ cos(ω·dt), sin(ω·dt), 1/ω</p>
 Can be one-dimensional (1D) or two-dimensional (2D) depending on spatial dimension.</dd>
 </dl>
 <h2 id="attributes-set">Attributes Set</h2>
-<p>self.omega_val : np.ndarray
-Copy of the input angular frequency array.
-self.cos_omega_dt : np.ndarray
-Cosine of ω(k) multiplied by time step: cos(ω(k) · dt).
-self.sin_omega_dt : np.ndarray
-Sine of ω(k) multiplied by time step: sin(ω(k) · dt).
-self.inv_omega : np.ndarray
-Inverse of ω(k), with zeros where ω(k) == 0 to avoid division by zero.</p>
+<ul>
+<li>self.omega_val : np.ndarray
+Copy of the input angular frequency array.</li>
+<li>self.cos_omega_dt : np.ndarray
+Cosine of ω(k) multiplied by time step: cos(ω(k) · dt).</li>
+<li>self.sin_omega_dt : np.ndarray
+Sine of ω(k) multiplied by time step: sin(ω(k) · dt).</li>
+<li>self.inv_omega : np.ndarray
+Inverse of ω(k), with zeros where ω(k) == 0 to avoid division by zero.</li>
+</ul>
 <h2 id="notes">Notes</h2>
 <ul>
 <li>This method is typically called during setup when solving second-order PDEs
@@ -11107,13 +11525,13 @@ involving dispersive waves (e.g., Klein-Gordon, Schrödinger, or water wave equa
 
     Attributes Set
     --------------
-    self.omega_val : np.ndarray
+    - self.omega_val : np.ndarray
         Copy of the input angular frequency array.
-    self.cos_omega_dt : np.ndarray
+    - self.cos_omega_dt : np.ndarray
         Cosine of ω(k) multiplied by time step: cos(ω(k) · dt).
-    self.sin_omega_dt : np.ndarray
+    - self.sin_omega_dt : np.ndarray
         Sine of ω(k) multiplied by time step: sin(ω(k) · dt).
-    self.inv_omega : np.ndarray
+    - self.inv_omega : np.ndarray
         Inverse of ω(k), with zeros where ω(k) == 0 to avoid division by zero.
 
     Notes
@@ -11638,11 +12056,8 @@ exponential integrator up to fourth-order accuracy in time.</p>
 <pre><code>uⁿ⁺¹ = e^(L Δt) uⁿ + Δt ∫₀¹ e^(L Δt (1 - τ)) φ(N(u(τ))) dτ
 </code></pre>
 <p>where φ denotes the nonlinear contributions evaluated at intermediate stages.</p>
-<h2 id="args">Args</h2>
-<dl>
-<dt><strong><code>u</code></strong> :&ensp;<code>np.ndarray</code></dt>
-<dd>Current solution in real space (physical grid values).</dd>
-</dl>
+<p>Parameters
+u (np.ndarray): Current solution in real space (physical grid values).</p>
 <h2 id="returns">Returns</h2>
 <dl>
 <dt><code>np.ndarray</code></dt>
@@ -11689,7 +12104,7 @@ apply_nonlinear
     
     where φ denotes the nonlinear contributions evaluated at intermediate stages.
 
-    Args:
+    Parameters
         u (np.ndarray): Current solution in real space (physical grid values).
 
     Returns:
@@ -11880,12 +12295,9 @@ F
 = time step size
 φ₁(z) = (eᶻ − 1)/z (with safe handling near z=0)</p>
 <p>Boundary conditions are applied after each update to ensure consistency.</p>
-<h2 id="args">Args</h2>
-<dl>
-<dt><strong><code>source_contribution</code></strong> :&ensp;<code>np.ndarray</code></dt>
-<dd>Array representing the external source term at current time step.
-Must match the spatial dimensions of self.u_prev.</dd>
-</dl>
+<p>Parameters
+source_contribution (np.ndarray): Array representing the external source term at current time step.
+Must match the spatial dimensions of self.u_prev.</p>
 <h2 id="returns">Returns</h2>
 <dl>
 <dt><code>np.ndarray</code></dt>
@@ -11929,7 +12341,7 @@ Must match the spatial dimensions of self.u_prev.</dd>
 
     Boundary conditions are applied after each update to ensure consistency.
 
-    Args:
+    Parameters
         source_contribution (np.ndarray): Array representing the external source term at current time step.
                                           Must match the spatial dimensions of self.u_prev.
 
@@ -12006,12 +12418,9 @@ F
 Δt
 = time step size</p>
 <p>Boundary conditions are applied after each update to ensure consistency.</p>
-<h2 id="args">Args</h2>
-<dl>
-<dt><strong><code>source_contribution</code></strong> :&ensp;<code>np.ndarray</code></dt>
-<dd>Array representing the external source term at current time step.
-Must match the spatial dimensions of self.u_prev.</dd>
-</dl>
+<p>Parameters
+source_contribution (np.ndarray): Array representing the external source term at current time step.
+Must match the spatial dimensions of self.u_prev.</p>
 <h2 id="returns">Returns</h2>
 <dl>
 <dt><code>np.ndarray</code></dt>
@@ -12043,7 +12452,7 @@ Must match the spatial dimensions of self.u_prev.</dd>
 
     Boundary conditions are applied after each update to ensure consistency.
 
-    Args:
+    Parameters
         source_contribution (np.ndarray): Array representing the external source term at current time step.
                                           Must match the spatial dimensions of self.u_prev.
 
@@ -16831,10 +17240,17 @@ Usage: psiOp(symbol_expr, u)</p></div>
 <div class="toc">
 <ul>
 <li><a href="#overview">Overview</a></li>
+<li><a href="#key-features">Key Features</a></li>
 <li><a href="#symbolic-workflow">Symbolic Workflow</a></li>
+<li><a href="#example-definition">Example Definition</a></li>
 <li><a href="#numerical-methods">Numerical Methods</a></li>
-<li><a href="#interactive-analysis">Interactive Analysis</a></li>
-<li><a href="#example-usage">Example Usage</a></li>
+<li><a href="#spectral-differentiation">Spectral Differentiation</a></li>
+<li><a href="#time-integration">Time Integration</a></li>
+<li><a href="#pseudo-differential-operators">Pseudo-Differential Operators</a></li>
+<li><a href="#interactive-symbol-analysis">Interactive Symbol Analysis</a></li>
+<li><a href="#example-use-case">Example Use Case</a></li>
+<li><a href="#applications">Applications</a></li>
+<li><a href="#dependencies">Dependencies</a></li>
 </ul>
 </div>
 <ul id="index">
