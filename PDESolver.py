@@ -312,12 +312,14 @@ class PseudoDifferentialOperator:
 
             if mode == 'symbol':
                 self.p_func = lambdify((x, xi_internal), expr, 'numpy')
+                self.symbol = expr
             elif mode == 'auto':
                 if var_u is None:
                     raise ValueError("var_u must be provided in mode='auto'")
                 exp_i = exp(I * x * xi_internal)
                 P_ei = expr.subs(var_u, exp_i)
                 symbol = simplify(P_ei / exp_i)
+                self.symbol = symbol
                 self.p_func = lambdify((x, xi_internal), symbol, 'numpy')
             else:
                 raise ValueError("mode must be 'auto' or 'symbol'")
@@ -331,6 +333,7 @@ class PseudoDifferentialOperator:
             self.ifft = partial(ifft2, workers=FFT_WORKERS)
 
             if mode == 'symbol':
+                self.symbol = expr
                 self.p_func = lambdify((x, y, xi_internal, eta_internal), expr, 'numpy')
             elif mode == 'auto':
                 if var_u is None:
@@ -338,6 +341,7 @@ class PseudoDifferentialOperator:
                 exp_i = exp(I * (x * xi_internal + y * eta_internal))
                 P_ei = expr.subs(var_u, exp_i)
                 symbol = simplify(P_ei / exp_i)
+                self.symbol = symbol
                 self.p_func = lambdify((x, y, xi_internal, eta_internal), symbol, 'numpy')
             else:
                 raise ValueError("mode must be 'auto' or 'symbol'")
@@ -1273,6 +1277,7 @@ class PseudoDifferentialOperator:
             plt.ylabel('y')
             plt.title(f'Phase Portrait at ξ={xi0}, η={eta0}')
             plt.show()
+            
     def visualize_characteristic_set(self, x_grid, xi_grid, y_grid=None, eta_grid=None, y0=0.0, x0=0.0, levels=[1e-1]):
         """
         Visualize the characteristic set of the pseudo-differential symbol, defined as the approximate zero set p(x, ξ) ≈ 0.
@@ -2200,6 +2205,7 @@ class PDESolver:
         
         self.u = candidate_functions[0]
 
+        self.u_eq = self.u
 
         args = self.u.args
         
@@ -2299,18 +2305,23 @@ class PDESolver:
                 - External symbolic operators (Op) and pseudo-differential operators (psiOp)
         """
         def is_nonlinear_term(term, u_func):
-            if any(arg.has(u_func) for arg in term.args if isinstance(arg, Function) and arg.func != u_func.func):
-                return True
-            if any(isinstance(arg, Pow) and arg.base == u_func and (arg.exp != 1) for arg in term.args):
-                return True
+            # If the term contains functions (Abs, sin, exp, ...) applied to u
+            if term.has(u_func):
+                for sub in preorder_traversal(term):
+                    if isinstance(sub, Function) and sub.has(u_func) and sub.func != u_func.func:
+                        return True
+            # If the term contains a nonlinear power of u
+            if term.has(Pow):
+                for pow_term in term.atoms(Pow):
+                    if pow_term.base == u_func and pow_term.exp != 1:
+                        return True
+            # If the term is a product containing u and its derivative
             if term.func == Mul:
                 factors = term.args
-                has_u = any(f == u_func for f in factors)
-                has_derivative = any(isinstance(f, Derivative) and f.expr.func == u_func.func for f in factors)
+                has_u = any((f.has(u_func) and not isinstance(f, Derivative) for f in factors))
+                has_derivative = any((isinstance(f, Derivative) and f.expr.func == u_func.func for f in factors))
                 if has_u and has_derivative:
                     return True
-            if term.has(u_func) and isinstance(term, Function) and term.func != u_func.func:
-                return True
             return False
     
         print("\n********************")
@@ -3121,7 +3132,7 @@ class PDESolver:
                     for deriv in term.atoms(Derivative):
                         if deriv.args[1][0] == self.x:
                             term_replaced = term_replaced.subs(deriv, symbols('u_x'))            
-                term_func = lambdify((self.t, self.x, self.u, 'u_x'), term_replaced, 'numpy')
+                term_func = lambdify((self.t, self.x, self.u_eq, 'u_x'), term_replaced, 'numpy')
                 if is_v:
                     nonlinear_term += term_func(0, self.X, self.v_prev, u_x)
                 else:
@@ -3145,7 +3156,7 @@ class PDESolver:
                             term_replaced = term_replaced.subs(deriv, symbols('u_x'))
                         elif deriv.args[1][0] == self.y:
                             term_replaced = term_replaced.subs(deriv, symbols('u_y'))
-                term_func = lambdify((self.t, self.x, self.y, self.u, 'u_x', 'u_y'), term_replaced, 'numpy')
+                term_func = lambdify((self.t, self.x, self.y, self.u_eq, 'u_x', 'u_y'), term_replaced, 'numpy')
                 if is_v:
                     nonlinear_term += term_func(0, self.X, self.Y, self.v_prev, u_x, u_y)
                 else:
