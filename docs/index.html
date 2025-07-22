@@ -758,7 +758,10 @@ class PseudoDifferentialOperator:
         NotImplementedError
             If the spatial dimension is neither 1 nor 2.
         &#34;&#34;&#34;
-        from sympy import symbols, series, simplify, sqrt, cos, sin, oo, powdenest, radsimp, expand, expand_power_base
+        from sympy import (
+            symbols, series, simplify, sqrt, cos, sin, oo, powdenest, radsimp,
+            expand, expand_power_base
+        )
     
         def preprocess_sqrt(expr, freq):
             return expr.replace(
@@ -767,13 +770,28 @@ class PseudoDifferentialOperator:
             )
     
         def preprocess_power(expr, freq):
-            &#34;&#34;&#34;Force factorization of the leading frequency variable in power expressions.&#34;&#34;&#34;
             return expr.replace(
                 lambda e: e.is_Pow and freq in e.free_symbols,
-                lambda e: freq**e.exp * (1 + e.base/freq**e.base.as_powers_dict().get(freq, 0))**e.exp
+                lambda e: freq**e.exp * (1 + e.base / freq**e.base.as_powers_dict().get(freq, 0))**e.exp
             )
-
-        # Check if the symbol is homogeneous
+    
+        def validate_order(power, coeff, vars_x, tol):
+            if power is None:
+                return None
+            if any(v in coeff.free_symbols for v in vars_x):
+                print(&#34;⚠️ Coefficient depends on spatial variables; ignoring&#34;)
+                return None
+            try:
+                coeff_val = abs(float(coeff.evalf()))
+                if coeff_val &lt; tol:
+                    print(f&#34;⚠️ Coefficient too small ({coeff_val:.2e} &lt; {tol})&#34;)
+                    return None
+            except Exception as e:
+                print(f&#34;⚠️ Coefficient evaluation failed: {e}&#34;)
+                return None
+            return int(power) if power == int(power) else float(power)
+    
+        # Homogeneity check
         is_homog, degree = self.is_homogeneous()
         if is_homog:
             return float(degree)
@@ -783,38 +801,37 @@ class PseudoDifferentialOperator:
         if self.dim == 1:
             x = self.vars_x[0]
             xi = symbols(&#39;xi&#39;, real=True, positive=True)
+    
             try:
                 print(&#34;1D symbol_order - method 1&#34;)
                 expr = preprocess_sqrt(self.expr, xi)
                 s = series(expr, xi, oo, n=max_order).removeO()
-                lead = s.as_leading_term(xi)
-                lead = simplify(powdenest(lead, force=True))
+                lead = simplify(powdenest(s.as_leading_term(xi), force=True))
                 power = lead.as_powers_dict().get(xi, None)
                 coeff = lead / xi**power if power is not None else 0
                 print(&#34;lead =&#34;, lead)
                 print(&#34;power =&#34;, power)
                 print(&#34;coeff =&#34;, coeff)
-    
-                if power is not None and (not coeff.free_symbols or x not in coeff.free_symbols):
-                    if abs(float(coeff.evalf())) &gt; tol:
-                        return int(power) if power == int(power) else float(power)
+                order = validate_order(power, coeff, [x], tol)
+                if order is not None:
+                    return order
             except Exception:
                 pass
     
             try:
                 print(&#34;1D symbol_order - method 2&#34;)
                 z = symbols(&#39;z&#39;, real=True, positive=True)
-                expr_z = self.expr.subs(xi, 1/z)
-                expr_z = preprocess_sqrt(expr_z, 1/z)
+                expr_z = preprocess_sqrt(self.expr.subs(xi, 1/z), 1/z)
                 s = series(expr_z, z, 0, n=max_order).removeO()
-                lead = s.as_leading_term(z)
-                lead = simplify(powdenest(lead, force=True))
+                lead = simplify(powdenest(s.as_leading_term(z), force=True))
                 power = lead.as_powers_dict().get(z, None)
+                coeff = lead / z**power if power is not None else 0
                 print(&#34;lead =&#34;, lead)
                 print(&#34;power =&#34;, power)
-    
-                if power is not None:
-                    return -float(power)
+                print(&#34;coeff =&#34;, coeff)
+                order = validate_order(power, coeff, [x], tol)
+                if order is not None:
+                    return -order
             except Exception as e:
                 print(f&#34;⚠️ fallback z failed: {e}&#34;)
             return None
@@ -827,51 +844,43 @@ class PseudoDifferentialOperator:
             try:
                 print(&#34;2D symbol_order - method 1&#34;)
                 p_rho = self.expr.subs({xi: rho * cos(theta), eta: rho * sin(theta)})
-                p_rho = preprocess_sqrt(p_rho, rho)
-                p_rho = preprocess_power(p_rho, rho)  
-                p_rho = simplify(p_rho)
-                s = series(p_rho, rho, oo, n=max_order).removeO()
-                s = expand(s)
-                lead = s.as_leading_term(rho)
-                lead = simplify(powdenest(lead, force=True))
-                lead = radsimp(lead)
+                p_rho = preprocess_power(preprocess_sqrt(p_rho, rho), rho)
+                s = series(simplify(p_rho), rho, oo, n=max_order).removeO()
+                lead = radsimp(simplify(powdenest(s.as_leading_term(rho), force=True)))
                 power = lead.as_powers_dict().get(rho, None)
                 coeff = lead / rho**power if power is not None else 0
                 print(&#34;lead =&#34;, lead)
                 print(&#34;power =&#34;, power)
                 print(&#34;coeff =&#34;, coeff)
-    
-                if power is not None and not any(v in coeff.free_symbols for v in (x, y)):
-                    if abs(float(coeff.evalf())) &gt; tol or power &gt; -1:
-                        return int(power) if power == int(power) else float(power)
+                order = validate_order(power, coeff, [x, y], tol)
+                if order is not None:
+                    return order
             except Exception as e:
                 print(f&#34;⚠️ polar expansion failed: {e}&#34;)
-                pass
     
             try:
                 print(&#34;2D symbol_order - method 2&#34;)
                 z = symbols(&#39;z&#39;, real=True, positive=True)
-                p_rho = self.expr.subs({xi: (1/z) * cos(theta), eta: (1/z) * sin(theta)})
-                p_rho = preprocess_sqrt(p_rho, 1/z)
-                p_rho = simplify(p_rho)
-                s = series(p_rho, z, 0, n=max_order).removeO()
-                lead = s.as_leading_term(z)
-                lead = simplify(powdenest(lead, force=True))
-                lead = radsimp(lead)
+                xi_eta = {xi: (1/z) * cos(theta), eta: (1/z) * sin(theta)}
+                p_rho = preprocess_sqrt(self.expr.subs(xi_eta), 1/z)
+                s = series(simplify(p_rho), z, 0, n=max_order).removeO()
+                lead = radsimp(simplify(powdenest(s.as_leading_term(z), force=True)))
                 power = lead.as_powers_dict().get(z, None)
+                coeff = lead / z**power if power is not None else 0
                 print(&#34;lead =&#34;, lead)
                 print(&#34;power =&#34;, power)
-    
-                if power is not None:
-                    order = -power
-                    return int(order) if order == int(order) else float(order)
+                print(&#34;coeff =&#34;, coeff)
+                order = validate_order(power, coeff, [x, y], tol)
+                if order is not None:
+                    return -order
             except Exception as e:
                 print(f&#34;⚠️ fallback z (2D) failed: {e}&#34;)
             return None
     
         else:
             raise NotImplementedError(&#34;Only 1D and 2D supported.&#34;)
-        
+
+    
     def asymptotic_expansion(self, order=3):
         &#34;&#34;&#34;
         Compute the asymptotic expansion of the symbol as |ξ| → ∞ (high-frequency regime).
@@ -13065,7 +13074,10 @@ or extracted automatically from symbolic equations (auto mode).</p>
         NotImplementedError
             If the spatial dimension is neither 1 nor 2.
         &#34;&#34;&#34;
-        from sympy import symbols, series, simplify, sqrt, cos, sin, oo, powdenest, radsimp, expand, expand_power_base
+        from sympy import (
+            symbols, series, simplify, sqrt, cos, sin, oo, powdenest, radsimp,
+            expand, expand_power_base
+        )
     
         def preprocess_sqrt(expr, freq):
             return expr.replace(
@@ -13074,13 +13086,28 @@ or extracted automatically from symbolic equations (auto mode).</p>
             )
     
         def preprocess_power(expr, freq):
-            &#34;&#34;&#34;Force factorization of the leading frequency variable in power expressions.&#34;&#34;&#34;
             return expr.replace(
                 lambda e: e.is_Pow and freq in e.free_symbols,
-                lambda e: freq**e.exp * (1 + e.base/freq**e.base.as_powers_dict().get(freq, 0))**e.exp
+                lambda e: freq**e.exp * (1 + e.base / freq**e.base.as_powers_dict().get(freq, 0))**e.exp
             )
-
-        # Check if the symbol is homogeneous
+    
+        def validate_order(power, coeff, vars_x, tol):
+            if power is None:
+                return None
+            if any(v in coeff.free_symbols for v in vars_x):
+                print(&#34;⚠️ Coefficient depends on spatial variables; ignoring&#34;)
+                return None
+            try:
+                coeff_val = abs(float(coeff.evalf()))
+                if coeff_val &lt; tol:
+                    print(f&#34;⚠️ Coefficient too small ({coeff_val:.2e} &lt; {tol})&#34;)
+                    return None
+            except Exception as e:
+                print(f&#34;⚠️ Coefficient evaluation failed: {e}&#34;)
+                return None
+            return int(power) if power == int(power) else float(power)
+    
+        # Homogeneity check
         is_homog, degree = self.is_homogeneous()
         if is_homog:
             return float(degree)
@@ -13090,38 +13117,37 @@ or extracted automatically from symbolic equations (auto mode).</p>
         if self.dim == 1:
             x = self.vars_x[0]
             xi = symbols(&#39;xi&#39;, real=True, positive=True)
+    
             try:
                 print(&#34;1D symbol_order - method 1&#34;)
                 expr = preprocess_sqrt(self.expr, xi)
                 s = series(expr, xi, oo, n=max_order).removeO()
-                lead = s.as_leading_term(xi)
-                lead = simplify(powdenest(lead, force=True))
+                lead = simplify(powdenest(s.as_leading_term(xi), force=True))
                 power = lead.as_powers_dict().get(xi, None)
                 coeff = lead / xi**power if power is not None else 0
                 print(&#34;lead =&#34;, lead)
                 print(&#34;power =&#34;, power)
                 print(&#34;coeff =&#34;, coeff)
-    
-                if power is not None and (not coeff.free_symbols or x not in coeff.free_symbols):
-                    if abs(float(coeff.evalf())) &gt; tol:
-                        return int(power) if power == int(power) else float(power)
+                order = validate_order(power, coeff, [x], tol)
+                if order is not None:
+                    return order
             except Exception:
                 pass
     
             try:
                 print(&#34;1D symbol_order - method 2&#34;)
                 z = symbols(&#39;z&#39;, real=True, positive=True)
-                expr_z = self.expr.subs(xi, 1/z)
-                expr_z = preprocess_sqrt(expr_z, 1/z)
+                expr_z = preprocess_sqrt(self.expr.subs(xi, 1/z), 1/z)
                 s = series(expr_z, z, 0, n=max_order).removeO()
-                lead = s.as_leading_term(z)
-                lead = simplify(powdenest(lead, force=True))
+                lead = simplify(powdenest(s.as_leading_term(z), force=True))
                 power = lead.as_powers_dict().get(z, None)
+                coeff = lead / z**power if power is not None else 0
                 print(&#34;lead =&#34;, lead)
                 print(&#34;power =&#34;, power)
-    
-                if power is not None:
-                    return -float(power)
+                print(&#34;coeff =&#34;, coeff)
+                order = validate_order(power, coeff, [x], tol)
+                if order is not None:
+                    return -order
             except Exception as e:
                 print(f&#34;⚠️ fallback z failed: {e}&#34;)
             return None
@@ -13134,51 +13160,43 @@ or extracted automatically from symbolic equations (auto mode).</p>
             try:
                 print(&#34;2D symbol_order - method 1&#34;)
                 p_rho = self.expr.subs({xi: rho * cos(theta), eta: rho * sin(theta)})
-                p_rho = preprocess_sqrt(p_rho, rho)
-                p_rho = preprocess_power(p_rho, rho)  
-                p_rho = simplify(p_rho)
-                s = series(p_rho, rho, oo, n=max_order).removeO()
-                s = expand(s)
-                lead = s.as_leading_term(rho)
-                lead = simplify(powdenest(lead, force=True))
-                lead = radsimp(lead)
+                p_rho = preprocess_power(preprocess_sqrt(p_rho, rho), rho)
+                s = series(simplify(p_rho), rho, oo, n=max_order).removeO()
+                lead = radsimp(simplify(powdenest(s.as_leading_term(rho), force=True)))
                 power = lead.as_powers_dict().get(rho, None)
                 coeff = lead / rho**power if power is not None else 0
                 print(&#34;lead =&#34;, lead)
                 print(&#34;power =&#34;, power)
                 print(&#34;coeff =&#34;, coeff)
-    
-                if power is not None and not any(v in coeff.free_symbols for v in (x, y)):
-                    if abs(float(coeff.evalf())) &gt; tol or power &gt; -1:
-                        return int(power) if power == int(power) else float(power)
+                order = validate_order(power, coeff, [x, y], tol)
+                if order is not None:
+                    return order
             except Exception as e:
                 print(f&#34;⚠️ polar expansion failed: {e}&#34;)
-                pass
     
             try:
                 print(&#34;2D symbol_order - method 2&#34;)
                 z = symbols(&#39;z&#39;, real=True, positive=True)
-                p_rho = self.expr.subs({xi: (1/z) * cos(theta), eta: (1/z) * sin(theta)})
-                p_rho = preprocess_sqrt(p_rho, 1/z)
-                p_rho = simplify(p_rho)
-                s = series(p_rho, z, 0, n=max_order).removeO()
-                lead = s.as_leading_term(z)
-                lead = simplify(powdenest(lead, force=True))
-                lead = radsimp(lead)
+                xi_eta = {xi: (1/z) * cos(theta), eta: (1/z) * sin(theta)}
+                p_rho = preprocess_sqrt(self.expr.subs(xi_eta), 1/z)
+                s = series(simplify(p_rho), z, 0, n=max_order).removeO()
+                lead = radsimp(simplify(powdenest(s.as_leading_term(z), force=True)))
                 power = lead.as_powers_dict().get(z, None)
+                coeff = lead / z**power if power is not None else 0
                 print(&#34;lead =&#34;, lead)
                 print(&#34;power =&#34;, power)
-    
-                if power is not None:
-                    order = -power
-                    return int(order) if order == int(order) else float(order)
+                print(&#34;coeff =&#34;, coeff)
+                order = validate_order(power, coeff, [x, y], tol)
+                if order is not None:
+                    return -order
             except Exception as e:
                 print(f&#34;⚠️ fallback z (2D) failed: {e}&#34;)
             return None
     
         else:
             raise NotImplementedError(&#34;Only 1D and 2D supported.&#34;)
-        
+
+    
     def asymptotic_expansion(self, order=3):
         &#34;&#34;&#34;
         Compute the asymptotic expansion of the symbol as |ξ| → ∞ (high-frequency regime).
@@ -16343,7 +16361,10 @@ Two strategies are used:
     NotImplementedError
         If the spatial dimension is neither 1 nor 2.
     &#34;&#34;&#34;
-    from sympy import symbols, series, simplify, sqrt, cos, sin, oo, powdenest, radsimp, expand, expand_power_base
+    from sympy import (
+        symbols, series, simplify, sqrt, cos, sin, oo, powdenest, radsimp,
+        expand, expand_power_base
+    )
 
     def preprocess_sqrt(expr, freq):
         return expr.replace(
@@ -16352,13 +16373,28 @@ Two strategies are used:
         )
 
     def preprocess_power(expr, freq):
-        &#34;&#34;&#34;Force factorization of the leading frequency variable in power expressions.&#34;&#34;&#34;
         return expr.replace(
             lambda e: e.is_Pow and freq in e.free_symbols,
-            lambda e: freq**e.exp * (1 + e.base/freq**e.base.as_powers_dict().get(freq, 0))**e.exp
+            lambda e: freq**e.exp * (1 + e.base / freq**e.base.as_powers_dict().get(freq, 0))**e.exp
         )
 
-    # Check if the symbol is homogeneous
+    def validate_order(power, coeff, vars_x, tol):
+        if power is None:
+            return None
+        if any(v in coeff.free_symbols for v in vars_x):
+            print(&#34;⚠️ Coefficient depends on spatial variables; ignoring&#34;)
+            return None
+        try:
+            coeff_val = abs(float(coeff.evalf()))
+            if coeff_val &lt; tol:
+                print(f&#34;⚠️ Coefficient too small ({coeff_val:.2e} &lt; {tol})&#34;)
+                return None
+        except Exception as e:
+            print(f&#34;⚠️ Coefficient evaluation failed: {e}&#34;)
+            return None
+        return int(power) if power == int(power) else float(power)
+
+    # Homogeneity check
     is_homog, degree = self.is_homogeneous()
     if is_homog:
         return float(degree)
@@ -16368,38 +16404,37 @@ Two strategies are used:
     if self.dim == 1:
         x = self.vars_x[0]
         xi = symbols(&#39;xi&#39;, real=True, positive=True)
+
         try:
             print(&#34;1D symbol_order - method 1&#34;)
             expr = preprocess_sqrt(self.expr, xi)
             s = series(expr, xi, oo, n=max_order).removeO()
-            lead = s.as_leading_term(xi)
-            lead = simplify(powdenest(lead, force=True))
+            lead = simplify(powdenest(s.as_leading_term(xi), force=True))
             power = lead.as_powers_dict().get(xi, None)
             coeff = lead / xi**power if power is not None else 0
             print(&#34;lead =&#34;, lead)
             print(&#34;power =&#34;, power)
             print(&#34;coeff =&#34;, coeff)
-
-            if power is not None and (not coeff.free_symbols or x not in coeff.free_symbols):
-                if abs(float(coeff.evalf())) &gt; tol:
-                    return int(power) if power == int(power) else float(power)
+            order = validate_order(power, coeff, [x], tol)
+            if order is not None:
+                return order
         except Exception:
             pass
 
         try:
             print(&#34;1D symbol_order - method 2&#34;)
             z = symbols(&#39;z&#39;, real=True, positive=True)
-            expr_z = self.expr.subs(xi, 1/z)
-            expr_z = preprocess_sqrt(expr_z, 1/z)
+            expr_z = preprocess_sqrt(self.expr.subs(xi, 1/z), 1/z)
             s = series(expr_z, z, 0, n=max_order).removeO()
-            lead = s.as_leading_term(z)
-            lead = simplify(powdenest(lead, force=True))
+            lead = simplify(powdenest(s.as_leading_term(z), force=True))
             power = lead.as_powers_dict().get(z, None)
+            coeff = lead / z**power if power is not None else 0
             print(&#34;lead =&#34;, lead)
             print(&#34;power =&#34;, power)
-
-            if power is not None:
-                return -float(power)
+            print(&#34;coeff =&#34;, coeff)
+            order = validate_order(power, coeff, [x], tol)
+            if order is not None:
+                return -order
         except Exception as e:
             print(f&#34;⚠️ fallback z failed: {e}&#34;)
         return None
@@ -16412,44 +16447,35 @@ Two strategies are used:
         try:
             print(&#34;2D symbol_order - method 1&#34;)
             p_rho = self.expr.subs({xi: rho * cos(theta), eta: rho * sin(theta)})
-            p_rho = preprocess_sqrt(p_rho, rho)
-            p_rho = preprocess_power(p_rho, rho)  
-            p_rho = simplify(p_rho)
-            s = series(p_rho, rho, oo, n=max_order).removeO()
-            s = expand(s)
-            lead = s.as_leading_term(rho)
-            lead = simplify(powdenest(lead, force=True))
-            lead = radsimp(lead)
+            p_rho = preprocess_power(preprocess_sqrt(p_rho, rho), rho)
+            s = series(simplify(p_rho), rho, oo, n=max_order).removeO()
+            lead = radsimp(simplify(powdenest(s.as_leading_term(rho), force=True)))
             power = lead.as_powers_dict().get(rho, None)
             coeff = lead / rho**power if power is not None else 0
             print(&#34;lead =&#34;, lead)
             print(&#34;power =&#34;, power)
             print(&#34;coeff =&#34;, coeff)
-
-            if power is not None and not any(v in coeff.free_symbols for v in (x, y)):
-                if abs(float(coeff.evalf())) &gt; tol or power &gt; -1:
-                    return int(power) if power == int(power) else float(power)
+            order = validate_order(power, coeff, [x, y], tol)
+            if order is not None:
+                return order
         except Exception as e:
             print(f&#34;⚠️ polar expansion failed: {e}&#34;)
-            pass
 
         try:
             print(&#34;2D symbol_order - method 2&#34;)
             z = symbols(&#39;z&#39;, real=True, positive=True)
-            p_rho = self.expr.subs({xi: (1/z) * cos(theta), eta: (1/z) * sin(theta)})
-            p_rho = preprocess_sqrt(p_rho, 1/z)
-            p_rho = simplify(p_rho)
-            s = series(p_rho, z, 0, n=max_order).removeO()
-            lead = s.as_leading_term(z)
-            lead = simplify(powdenest(lead, force=True))
-            lead = radsimp(lead)
+            xi_eta = {xi: (1/z) * cos(theta), eta: (1/z) * sin(theta)}
+            p_rho = preprocess_sqrt(self.expr.subs(xi_eta), 1/z)
+            s = series(simplify(p_rho), z, 0, n=max_order).removeO()
+            lead = radsimp(simplify(powdenest(s.as_leading_term(z), force=True)))
             power = lead.as_powers_dict().get(z, None)
+            coeff = lead / z**power if power is not None else 0
             print(&#34;lead =&#34;, lead)
             print(&#34;power =&#34;, power)
-
-            if power is not None:
-                order = -power
-                return int(order) if order == int(order) else float(order)
+            print(&#34;coeff =&#34;, coeff)
+            order = validate_order(power, coeff, [x, y], tol)
+            if order is not None:
+                return -order
         except Exception as e:
             print(f&#34;⚠️ fallback z (2D) failed: {e}&#34;)
         return None
