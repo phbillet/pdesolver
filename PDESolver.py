@@ -213,22 +213,21 @@ from sympy import (
     asin, acos, atan, acot, asec, acsc,
     sinh, cosh, tanh, coth, sech, csch,
     asinh, acosh, atanh, acoth, asech, acsch,
-    exp, ln, factorial, 
+    exp, ln, log, factorial, 
     diff, Derivative, integrate, 
     fourier_transform, inverse_fourier_transform,
 )
 from sympy.core.function import AppliedUndef
-from IPython.display import display
 from scipy.special import legendre, eval_hermite, airy, eval_genlaguerre
 from matplotlib import cm
 from matplotlib.animation import FuncAnimation
 import matplotlib.animation as animation
 from matplotlib import rc
-from IPython.display import HTML
 from functools import partial
 from misc import * 
-from IPython.display import display
-from ipywidgets import interact, FloatSlider, Dropdown
+from IPython.display import display, clear_output, HTML
+from ipywidgets import interact, FloatSlider, Dropdown, widgets
+from IPython.display import display, clear_output
 from itertools import product
 
     
@@ -319,6 +318,7 @@ class PseudoDifferentialOperator:
                 exp_i = exp(I * x * xi_internal)
                 P_ei = expr.subs(var_u, exp_i)
                 symbol = simplify(P_ei / exp_i)
+                symbol = expand(symbol)
                 self.symbol = symbol
                 self.p_func = lambdify((x, xi_internal), symbol, 'numpy')
             else:
@@ -341,6 +341,7 @@ class PseudoDifferentialOperator:
                 exp_i = exp(I * (x * xi_internal + y * eta_internal))
                 P_ei = expr.subs(var_u, exp_i)
                 symbol = simplify(P_ei / exp_i)
+                symbol = expand(symbol)
                 self.symbol = symbol
                 self.p_func = lambdify((x, y, xi_internal, eta_internal), symbol, 'numpy')
             else:
@@ -984,17 +985,17 @@ class PseudoDifferentialOperator:
             x, = self.vars_x
             xi = symbols('xi')
             return {
-                'dx/dt': diff(self.expr, xi),
-                'dxi/dt': -diff(self.expr, x)
+                'dx/dt': diff(self.symbol, xi),
+                'dxi/dt': -diff(self.symbol, x)
             }
         elif self.dim == 2:
             x, y = self.vars_x
             xi, eta = symbols('xi eta')
             return {
-                'dx/dt': diff(self.expr, xi),
-                'dy/dt': diff(self.expr, eta),
-                'dxi/dt': -diff(self.expr, x),
-                'deta/dt': -diff(self.expr, y)
+                'dx/dt': diff(self.symbol, xi),
+                'dy/dt': diff(self.symbol, eta),
+                'dxi/dt': -diff(self.symbol, x),
+                'deta/dt': -diff(self.symbol, y)
             }
 
     def is_elliptic_numerically(self, x_grid, xi_grid, threshold=1e-8):
@@ -1458,7 +1459,7 @@ class PseudoDifferentialOperator:
             plt.title(f'Dynamic Wavefront at t={t_grid[0]}')
             plt.show()
 
-    def plot_hamiltonian_flow(self, x0=0.0, xi0=5.0, y0=0.0, eta0=0.0, tmax=1.0, n_steps=100):
+    def plot_hamiltonian_flow(self, x0=0.0, xi0=5.0, y0=0.0, eta0=0.0, tmax=1.0, n_steps=100, show_field=True):
         """
         Integrate and plot the Hamiltonian trajectories of the symbol in phase space.
 
@@ -1497,8 +1498,9 @@ class PseudoDifferentialOperator:
             under the Hamiltonian dynamics.
         """
         def make_real(expr):
-            """Return the real part of an expression (if complex)."""
-            return simplify(expr.as_real_imag()[0])
+            from sympy import re, simplify
+            expr = expr.doit(deep=True)
+            return simplify(re(expr))
     
         H = self.symplectic_flow()
     
@@ -1520,6 +1522,15 @@ class PseudoDifferentialOperator:
                 return [dxdt(x, xi), dxidt(x, xi)]
     
             sol = solve_ivp(hamilton, [0, tmax], [x0, xi0], t_eval=np.linspace(0, tmax, n_steps))
+
+            if sol.status != 0:
+                print(f"⚠️ Integration warning: {sol.message}")
+            
+            n_points = sol.y.shape[1]
+            if n_points < n_steps:
+                print(f"⚠️ Only {n_points} frames computed. Adjusting animation.")
+                n_steps = n_points
+
             x_vals, xi_vals = sol.y
     
             plt.plot(x_vals, xi_vals)
@@ -1548,10 +1559,29 @@ class PseudoDifferentialOperator:
                 ]
     
             sol = solve_ivp(hamilton, [0, tmax], [x0, y0, xi0, eta0], t_eval=np.linspace(0, tmax, n_steps))
+
+            if sol.status != 0:
+                print(f"⚠️ Integration warning: {sol.message}")
+            
+            n_points = sol.y.shape[1]
+            if n_points < n_steps:
+                print(f"⚠️ Only {n_points} frames computed. Adjusting animation.")
+                n_steps = n_points
+
             x_vals, y_vals, xi_vals, eta_vals = sol.y
     
             plt.plot(x_vals, y_vals, label='Position')
             plt.quiver(x_vals, y_vals, xi_vals, eta_vals, scale=20, width=0.003, alpha=0.5, color='r')
+            
+            # Vector field of the flow (optional)
+            if show_field:
+                X, Y = np.meshgrid(np.linspace(min(x_vals), max(x_vals), 20),
+                                   np.linspace(min(y_vals), max(y_vals), 20))
+                XI, ETA = xi0 * np.ones_like(X), eta0 * np.ones_like(Y)
+                U = dxdt(X, Y, XI, ETA)
+                V = dydt(X, Y, XI, ETA)
+                plt.quiver(X, Y, U, V, color='gray', alpha=0.2, scale=30, width=0.002)
+
             plt.xlabel("x")
             plt.ylabel("y")
             plt.title("Hamiltonian Flow in Phase Space (2D)")
@@ -1746,9 +1776,15 @@ class PseudoDifferentialOperator:
         rc('animation', html='jshtml')
     
         def make_real(expr):
-            return simplify(expr.as_real_imag()[0])
-    
+            from sympy import re, simplify
+            expr = expr.doit(deep=True)
+            return simplify(re(expr))
+  
         H = self.symplectic_flow()
+
+        H = {k: v.doit(deep=True) for k, v in H.items()}
+
+        print("H = ", H)
     
         if any(im(H[k]) != 0 for k in H):
             print("⚠️ The Hamiltonian field is complex. Only the real part is used for integration.")
@@ -1766,6 +1802,15 @@ class PseudoDifferentialOperator:
     
             sol = solve_ivp(hamilton, [0, tmax], [x0, xi0],
                             t_eval=np.linspace(0, tmax, n_frames))
+            
+            if sol.status != 0:
+                print(f"⚠️ Integration warning: {sol.message}")
+            
+            n_points = sol.y.shape[1]
+            if n_points < n_frames:
+                print(f"⚠️ Only {n_points} frames computed. Adjusting animation.")
+                n_frames = n_points
+
             x_vals, xi_vals = sol.y
     
             if projection is None:
@@ -1837,6 +1882,15 @@ class PseudoDifferentialOperator:
     
             sol = solve_ivp(hamilton, [0, tmax], [x0, y0, xi0, eta0],
                             t_eval=np.linspace(0, tmax, n_frames))
+
+            if sol.status != 0:
+                print(f"⚠️ Integration warning: {sol.message}")
+            
+            n_points = sol.y.shape[1]
+            if n_points < n_frames:
+                print(f"⚠️ Only {n_points} frames computed. Adjusting animation.")
+                n_frames = n_points
+                
             x_vals, y_vals, xi_vals, eta_vals = sol.y
     
             if projection is None:
