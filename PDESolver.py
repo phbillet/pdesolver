@@ -982,15 +982,17 @@ class PseudoDifferentialOperator:
         - This flow preserves the symplectic structure of phase space.
         """
         if self.dim == 1:
-            x, = self.vars_x
-            xi = symbols('xi')
+            x,  = self.vars_x
+            xi = symbols('xi', real=True)
+            print("x = ", x)
+            print("xi = ", xi)
             return {
                 'dx/dt': diff(self.symbol, xi),
                 'dxi/dt': -diff(self.symbol, x)
             }
         elif self.dim == 2:
             x, y = self.vars_x
-            xi, eta = symbols('xi eta')
+            xi, eta = symbols('xi eta', real=True)
             return {
                 'dx/dt': diff(self.symbol, xi),
                 'dy/dt': diff(self.symbol, eta),
@@ -1352,36 +1354,39 @@ class PseudoDifferentialOperator:
 
     def visualize_characteristic_gradient(self, x_grid, xi_grid, y_grid=None, eta_grid=None, y0=0.0, x0=0.0):
         """
-        Visualize the norm of the gradient of the symbol p(x, ξ) or p(x₀, y₀, ξ, η) over phase space.
-    
-        This method computes and displays |∇p|, the magnitude of the gradient of the pseudo-differential operator's symbol.
-        High values indicate strong variation in the symbol, while low values suggest near-zero regions (characteristic sets).
-    
-        In 1D:
-            The full gradient ∇p = (∂ₓp, ∂ξp) is evaluated over the (x, ξ) grid.
-            Displays |∇p(x, ξ)| to highlight areas where the symbol changes rapidly.
-    
-        In 2D:
-            Evaluates ∇p = (∂ξp, ∂ηp) at fixed spatial point (x₀, y₀).
-            Displays |∇p(x₀, y₀, ξ, η)| to locate frequency directions where the symbol varies strongly.
-    
-        Parameters:
-            x_grid (ndarray): 1D array of spatial coordinates (x) for 1D case or evaluation point in 2D.
-            xi_grid (ndarray): 1D array of frequency coordinates (ξ).
-            y_grid (ndarray, optional): 2D spatial grid for y-coordinate (not used directly here). Default: None.
-            eta_grid (ndarray, optional): 1D array of frequency coordinates (η) for 2D visualization. Default: None.
-            y0 (float, optional): Fixed y-coordinate in 2D mode. Default: 0.0.
-            x0 (float, optional): Fixed x-coordinate in 2D mode. Default: 0.0.
-    
-        Displays:
-            A color map showing |∇p| over:
-              - (x, ξ) grid in 1D
-              - (ξ, η) grid at (x₀, y₀) in 2D
-    
-        Notes:
-            - Gradient is computed numerically using np.gradient().
-            - Color intensity reflects the strength of the gradient — useful for identifying singularities.
-            - Characteristic sets often lie where |∇p| is small and p ≈ 0.
+        Visualize the norm of the gradient of the symbol in phase space.
+        
+        This method computes the magnitude of the gradient |∇p| of a pseudo-differential 
+        symbol p(x, ξ) in 1D or p(x, y, ξ, η) in 2D. The resulting colormap reveals 
+        regions where the symbol varies rapidly or remains nearly stationary, 
+        which is particularly useful for analyzing characteristic sets.
+        
+        Parameters
+        ----------
+        x_grid : numpy.ndarray
+            1D array of spatial coordinates for the x-direction.
+        xi_grid : numpy.ndarray
+            1D array of frequency coordinates (ξ).
+        y_grid : numpy.ndarray, optional
+            1D array of spatial coordinates for the y-direction (used in 2D mode). Default is None.
+        eta_grid : numpy.ndarray, optional
+            1D array of frequency coordinates (η) for the 2D case. Default is None.
+        x0 : float, optional
+            Fixed x-coordinate for evaluating the symbol in 2D. Default is 0.0.
+        y0 : float, optional
+            Fixed y-coordinate for evaluating the symbol in 2D. Default is 0.0.
+        
+        Returns
+        -------
+        None
+            Displays a 2D colormap of |∇p| over the relevant phase-space domain.
+        
+        Notes
+        -----
+        - In 1D, the full gradient ∇p = (∂ₓp, ∂ξp) is computed over the (x, ξ) grid.
+        - In 2D, the gradient ∇p = (∂ξp, ∂ηp) is computed at a fixed spatial point (x₀, y₀) over the (ξ, η) grid.
+        - Numerical differentiation is performed using `np.gradient`.
+        - High values of |∇p| indicate rapid variation of the symbol, while low values typically suggest characteristic regions.
         """
         if self.dim == 1:
             X, XI = np.meshgrid(x_grid, xi_grid, indexing='ij')
@@ -1408,56 +1413,241 @@ class PseudoDifferentialOperator:
 
     def visualize_dynamic_wavefront(self, x_grid, t_grid, y_grid=None, xi0=5.0, eta0=0.0):
         """
-        Visualize the propagation of a singularity along bicharacteristic curves as a dynamic wavefront.
-    
-        This method generates a 1D or 2D spatial-time plot of a wavefield initialized with a given frequency 
-        (xi₀, η₀). In 1D, it shows u(x, t) = cos(ξ₀x - ξ₀t), representing a right-moving wave. In 2D, it plots  
-        u(x, y, t) = cos(ξ₀x + η₀y - |k|t), where |k| = √(ξ₀² + η₀²), simulating a plane wave propagating in 
-        direction (ξ₀, η₀).
-    
+        Create an animation of a monochromatic wave evolving under the pseudo-differential operator.
+
+        This method visualizes the time evolution of a wavefront governed by the symbol of the 
+        pseudo-differential operator. The wave is initialized as a monochromatic solution with 
+        fixed spatial frequencies and evolves according to the dispersion relation 
+        ω = p(x, ξ), where p is the symbol of the operator and (ξ, η) are spatial frequencies.
+
         Parameters
         ----------
-        x_grid : ndarray
-            1D or 2D array representing the spatial grid in the x-direction.
-        t_grid : ndarray
-            Array of time points used to construct the wave evolution.
-        y_grid : ndarray, optional
-            1D or 2D array for the second spatial dimension (only used in 2D cases).
-        xi0 : float, default=5.0
-            Initial frequency component in the x-direction.
-        eta0 : float, default=0.0
-            Initial frequency component in the y-direction (used in 2D only).
-    
+        x_grid : array_like
+            1D array representing the spatial grid in the x-direction.
+        t_grid : array_like
+            1D array of time points used to generate the animation frames.
+        y_grid : array_like, optional
+            1D array representing the spatial grid in the y-direction (required for 2D operators).
+        xi0 : float, optional
+            Initial spatial frequency in the x-direction. Default is 5.0.
+        eta0 : float, optional
+            Initial spatial frequency in the y-direction (used in 2D). Default is 0.0.
+
+        Returns
+        -------
+        matplotlib.animation.FuncAnimation
+            Animation object showing the time evolution of the monochromatic wave.
+
         Notes
         -----
-        - In 1D, this visualizes a simple harmonic wave moving at unit speed.
-        - In 2D, the wave propagates with group velocity magnitude |k| = √(ξ₀² + η₀²).
-        - The wavefronts are stationary in time for 2D due to plotting at fixed t = t_grid[0].
-    
-        Displays
-        --------
-        A matplotlib image plot showing:
-            - In 1D: u(x, t) over space-time (x, t)
-            - In 2D: u(x, y) at initial time t = t_grid[0]
+        - In 1D, visualizes the wave u(x, t) = cos(ξ₀·x − ω·t).
+        - In 2D, visualizes u(x, y, t) = cos(ξ₀·x + η₀·y − ω·t).
+        - The frequency ω is computed as the symbol evaluated at the fixed frequency components.
+        - If the symbol depends on space, it is evaluated at the origin (x=0, y=0).
+        
+        Raises
+        ------
+        ValueError
+            If `y_grid` is not provided while the operator is 2D.
+        NotImplementedError
+            If the spatial dimension of the operator is neither 1 nor 2.
         """
+
         if self.dim == 1:
-            X, T = np.meshgrid(x_grid, t_grid)
-            U = np.cos(xi0 * X - xi0 * T)
-            plt.imshow(U, extent=[t_grid.min(), t_grid.max(), x_grid.min(), x_grid.max()], aspect='auto', origin='lower', cmap='seismic')
-            plt.colorbar(label='u(x, t)')
-            plt.xlabel('t (time)')
-            plt.ylabel('x (position)')
-            plt.title('Dynamic Wavefront u(x, t)')
+            # Calculer omega a partir du symbole
+            from sympy import symbols, N
+            x = self.vars_x[0]
+            xi = symbols('xi', real=True)
+            try:
+                omega_symbolic = self.expr.subs({x: 0, xi: xi0})
+            except:
+                omega_symbolic = self.expr.subs(xi, xi0)
+                
+            omega_val = float(N(omega_symbolic.as_real_imag()[0]))
+    
+            # Preparer les donnees pour l'animation
+            X, T = np.meshgrid(x_grid, t_grid, indexing='ij')
+            
+            # Initialiser la figure et l'axe
+            fig, ax = plt.subplots()
+            ax.set_xlim(x_grid.min(), x_grid.max())
+            ax.set_ylim(-1.1, 1.1)
+            ax.set_xlabel('x')
+            ax.set_ylabel('u(x, t)')
+            ax.set_title(f'Dynamic 1D Wavefront u(x, t) = cos({xi0}*x - {omega_val:.2f}*t)')
+            ax.grid(True)
+            
+            line, = ax.plot([], [], lw=2)
+            
+            # Pre-calculer les temps
+            T_vals = t_grid
+            
+            def animate(frame):
+                t = T_vals[frame] if frame < len(T_vals) else T_vals[-1]
+                U = np.cos(xi0 * x_grid - omega_val * t)
+                line.set_data(x_grid, U)
+                ax.set_title(f'Dynamic 1D Wavefront u(x, t) = cos({xi0}*x - {omega_val:.2f}*t) at t={t:.2f}')
+                return line,
+    
+            ani = animation.FuncAnimation(fig, animate, frames=len(T_vals), interval=50, blit=True, repeat=True)
             plt.show()
+            return ani
+    
         elif self.dim == 2:
-            X, Y = np.meshgrid(x_grid, y_grid)
-            U = np.cos(xi0 * X + eta0 * Y - np.sqrt(xi0**2 + eta0**2) * t_grid[0])
-            plt.imshow(U, extent=[x_grid.min(), x_grid.max(), y_grid.min(), y_grid.max()], aspect='auto', origin='lower', cmap='seismic')
-            plt.colorbar(label='u(x, y)')
-            plt.xlabel('x')
-            plt.ylabel('y')
-            plt.title(f'Dynamic Wavefront at t={t_grid[0]}')
+            # Calculer omega a partir du symbole
+            from sympy import symbols, N
+            x, y = self.vars_x
+            xi, eta = symbols('xi eta', real=True)
+            try:
+                omega_symbolic = self.expr.subs({x: 0, y: 0, xi: xi0, eta: eta0})
+            except:
+                omega_symbolic = self.expr.subs({xi: xi0, eta: eta0})
+                
+            omega_val = float(N(omega_symbolic.as_real_imag()[0]))
+    
+            if y_grid is None:
+                raise ValueError("y_grid must be provided for 2D visualization.")
+    
+            # Creer les grilles
+            X, Y = np.meshgrid(x_grid, y_grid, indexing='ij')
+            
+            # Initialiser la figure
+            fig, ax = plt.subplots()
+            ax.set_xlabel('x')
+            ax.set_ylabel('y')
+            
+            # Premiere frame
+            t0 = t_grid[0] if len(t_grid) > 0 else 0.0
+            U = np.cos(xi0 * X + eta0 * Y - omega_val * t0)
+            extent = [x_grid.min(), x_grid.max(), y_grid.min(), y_grid.max()]
+            im = ax.imshow(U, extent=extent, aspect='equal', origin='lower', cmap='seismic', vmin=-1, vmax=1)
+            ax.set_title(f'Dynamic 2D Wavefront at t={t0:.2f}')
+            fig.colorbar(im, ax=ax, label='u(x, y, t)')
+            
+            # Pre-calculer les temps
+            T_vals = t_grid
+            
+            def animate(frame):
+                t = T_vals[frame] if frame < len(T_vals) else T_vals[-1]
+                U = np.cos(xi0 * X + eta0 * Y - omega_val * t)
+                im.set_array(U)
+                ax.set_title(f'Dynamic 2D Wavefront at t={t:.2f}')
+                return [im]
+    
+            ani = animation.FuncAnimation(fig, animate, frames=len(T_vals), interval=50, blit=False, repeat=True)
             plt.show()
+            return ani
+
+
+    def simulate_evolution(self, x_grid, t_grid, y_grid=None,
+                           initial_condition=None, initial_velocity=None,
+                           solver_params=None, component='real'):
+        """
+        Simulate and animate the time evolution of an initial condition under a pseudo-differential operator.
+
+        This method solves the PDE governed by the action of a pseudo-differential operator `p(x, D)`,
+        either as a first-order or second-order time evolution, and generates an animation of the resulting
+        wave propagation. The order of the PDE depends on whether an initial velocity is provided.
+
+        Parameters
+        ----------
+        x_grid : numpy.ndarray
+            Spatial grid in the x-direction.
+        t_grid : numpy.ndarray
+            Temporal grid for the simulation.
+        y_grid : numpy.ndarray, optional
+            Spatial grid in the y-direction (used for 2D problems).
+        initial_condition : callable, optional
+            Function specifying the initial condition u₀(x) or u₀(x, y).
+        initial_velocity : callable, optional
+            Function specifying the initial velocity ∂ₜu₀(x) or ∂ₜu₀(x, y). If provided, a second-order
+            PDE is solved.
+        solver_params : dict, optional
+            Additional keyword arguments passed to the PDE solver.
+        component : {'real', 'imag', 'abs', 'angle'}
+            Specifies which component of the solution to animate.
+
+        Returns
+        -------
+        matplotlib.animation.FuncAnimation
+            Animation object showing the evolution of the solution over time.
+
+        Notes
+        -----
+        - Solves the PDE:
+            - First-order: ∂ₜu = -i ⋅ p(x, D) u
+            - Second-order: ∂²ₜu = -p(x, D)² u
+        - Supports 1D and 2D simulations depending on the presence of `y_grid`.
+        - The solution is animated using the specified component view.
+        - Useful for visualizing wave propagation and dispersive effects driven by pseudo-differential operators.
+        """
+        if solver_params is None:
+            solver_params = {}
+    
+        # --- 1. Symbolic variables ---
+        t = symbols('t', real=True)
+        u_sym = Function('u')
+        is_second_order = initial_velocity is not None
+    
+        if self.dim == 1:
+            x, = self.vars_x
+            xi = symbols('xi', real=True)
+            u = u_sym(t, x)
+            if is_second_order:
+                eq = Eq(diff(u, t, 2), psiOp(self.expr, u))
+            else:
+                eq = Eq(diff(u, t), psiOp(self.expr, u))
+        elif self.dim == 2:
+            x, y = self.vars_x
+            xi, eta = symbols('xi eta', real=True)
+            u = u_sym(t, x, y)
+            if is_second_order:
+                eq = Eq(diff(u, t, 2), psiOp(self.expr, u))
+            else:
+                eq = Eq(diff(u, t), psiOp(self.expr, u))
+        else:
+            raise NotImplementedError("Only 1D and 2D are supported.")
+    
+        # --- 2. Create the solver ---
+        solver = PDESolver(eq)
+        params = {
+            'Lx': x_grid.max() - x_grid.min(),
+            'Nx': len(x_grid),
+            'Lt': t_grid.max() - t_grid.min(),
+            'Nt': len(t_grid),
+            'boundary_condition': 'periodic',
+            'n_frames': min(100, len(t_grid))
+        }
+        if self.dim == 2:
+            params['Ly'] = y_grid.max() - y_grid.min()
+            params['Ny'] = len(y_grid)
+        params.update(solver_params)
+    
+        # --- 3. Initial condition ---
+        if initial_condition is None:
+            if self.dim == 1:
+                x_mid = (x_grid.max() + x_grid.min()) / 2
+                sigma = (x_grid.max() - x_grid.min()) / 10
+                initial_condition = lambda x: np.exp(-((x - x_mid) ** 2) / (2 * sigma**2)) * np.exp(1j * 2 * x)
+            else:
+                x_mid = (x_grid.max() + x_grid.min()) / 2
+                y_mid = (y_grid.max() + y_grid.min()) / 2
+                sigma = (x_grid.max() - x_grid.min()) / 10
+                initial_condition = lambda x, y: np.exp(-((x - x_mid)**2 + (y - y_mid)**2) / (2 * sigma**2)) * np.exp(1j * (2 * x + 1 * y))
+        params['initial_condition'] = initial_condition
+        if is_second_order:
+            params['initial_velocity'] = initial_velocity
+    
+        # --- 4. Solving ---
+        print("⚙️ Solving the evolution equation (order {} in time)...".format(2 if is_second_order else 1))
+        solver.setup(**params)
+        solver.solve()
+        print("✅ Solving completed.")
+    
+        # --- 5. Animation ---
+        print("🎞️ Creating the animation...")
+        ani = solver.animate(component=component)
+        return ani
 
     def plot_hamiltonian_flow(self, x0=0.0, xi0=5.0, y0=0.0, eta0=0.0, tmax=1.0, n_steps=100, show_field=True):
         """
@@ -3494,7 +3684,25 @@ class PDESolver:
             source = np.zeros_like(self.u_prev)
         else:
             source = source_contribution
-    
+
+        def spectral_filter(u, cutoff=0.8):
+            if u.ndim == 1:
+                u_hat = self.fft(u)
+                N = len(u)
+                k = fftfreq(N)
+                mask = np.exp(-(k / cutoff)**8)
+                return self.ifft(u_hat * mask).real
+            elif u.ndim == 2:
+                u_hat = self.fft(u)
+                Ny, Nx = u.shape
+                ky = fftfreq(Ny)[:, None]
+                kx = fftfreq(Nx)[None, :]
+                k_squared = kx**2 + ky**2
+                mask = np.exp(-(np.sqrt(k_squared) / cutoff)**8)
+                return self.ifft(u_hat * mask).real
+            else:
+                raise ValueError("Only 1D and 2D arrays are supported.")
+
         # Recalculate symbol if necessary
         if self.is_spatial:
             self.prepare_symbol_tables()  # Recalculates self.combined_symbol
@@ -3528,11 +3736,10 @@ class PDESolver:
                 u_new = self.ifft(u_hat_new)
             else:
                 # if the symbol depends on spatial variables : Euler method
-                # it works when the symbol is free of xi (and eta),
-                # otherwise the error becomes infinite....
                 Lu_prev = self.apply_psiOp(self.u_prev)
                 u_nl = self.apply_nonlinear(self.u_prev)
                 u_new = self.u_prev + self.dt * (Lu_prev + u_nl + source)
+                u_new = spectral_filter(u_new, cutoff=self.dealiasing_ratio)
         # Applying boundary conditions
         self.apply_boundary(u_new)
         return u_new
