@@ -1847,15 +1847,8 @@ class PseudoDifferentialOperator:
     
         # --- 3. Initial condition ---
         if initial_condition is None:
-            if self.dim == 1:
-                x_mid = (x_grid.max() + x_grid.min()) / 2
-                sigma = (x_grid.max() - x_grid.min()) / 10
-                initial_condition = lambda x: np.exp(-((x - x_mid) ** 2) / (2 * sigma**2)) * np.exp(1j * 2 * x)
-            else:
-                x_mid = (x_grid.max() + x_grid.min()) / 2
-                y_mid = (y_grid.max() + y_grid.min()) / 2
-                sigma = (x_grid.max() - x_grid.min()) / 10
-                initial_condition = lambda x, y: np.exp(-((x - x_mid)**2 + (y - y_mid)**2) / (2 * sigma**2)) * np.exp(1j * (2 * x + 1 * y))
+            raise ValueError(&#34;initial_condition is None. Please provide a function u₀(x) or u₀(x, y) as the initial condition.&#34;)
+        
         params[&#39;initial_condition&#39;] = initial_condition
         if is_second_order:
             params[&#39;initial_velocity&#39;] = initial_velocity
@@ -5389,18 +5382,18 @@ class PDESolver:
             return ani
     
         else:  # dim == 2
-            fig = plt.figure(figsize=(12, 6))
+            fig = plt.figure(figsize=(14, 8))              
             ax = fig.add_subplot(111, projection=&#39;3d&#39;)
             ax.set_xlabel(&#39;x&#39;)
             ax.set_ylabel(&#39;y&#39;)
             ax.set_zlabel(f&#39;{component.title()} of u&#39;)
+            ax.zaxis.labelpad = 0
             ax.set_title(&#39;Initial condition&#39;)
-    
+            
             data0 = get_component(self.frames[0])
             surf = [ax.plot_surface(self.X, self.Y, data0, cmap=&#39;viridis&#39;)]
-            plt.tight_layout()
             plt.show()
-    
+
             def update(frame_number):
                 frame = frame_indices[frame_number]
                 current_data = get_component(self.frames[frame])
@@ -8562,18 +8555,18 @@ if unsupported dimensions are detected, or invalid dependencies.</dd>
             return ani
     
         else:  # dim == 2
-            fig = plt.figure(figsize=(12, 6))
+            fig = plt.figure(figsize=(14, 8))              
             ax = fig.add_subplot(111, projection=&#39;3d&#39;)
             ax.set_xlabel(&#39;x&#39;)
             ax.set_ylabel(&#39;y&#39;)
             ax.set_zlabel(f&#39;{component.title()} of u&#39;)
+            ax.zaxis.labelpad = 0
             ax.set_title(&#39;Initial condition&#39;)
-    
+            
             data0 = get_component(self.frames[0])
             surf = [ax.plot_surface(self.X, self.Y, data0, cmap=&#39;viridis&#39;)]
-            plt.tight_layout()
             plt.show()
-    
+
             def update(frame_number):
                 frame = frame_indices[frame_number]
                 current_data = get_component(self.frames[frame])
@@ -9013,16 +9006,16 @@ contour overlays.</p>
         return ani
 
     else:  # dim == 2
-        fig = plt.figure(figsize=(12, 6))
+        fig = plt.figure(figsize=(14, 8))              
         ax = fig.add_subplot(111, projection=&#39;3d&#39;)
         ax.set_xlabel(&#39;x&#39;)
         ax.set_ylabel(&#39;y&#39;)
         ax.set_zlabel(f&#39;{component.title()} of u&#39;)
+        ax.zaxis.labelpad = 0
         ax.set_title(&#39;Initial condition&#39;)
-
+        
         data0 = get_component(self.frames[0])
         surf = [ax.plot_surface(self.X, self.Y, data0, cmap=&#39;viridis&#39;)]
-        plt.tight_layout()
         plt.show()
 
         def update(frame_number):
@@ -14459,15 +14452,8 @@ or extracted automatically from symbolic equations (auto mode).</p>
     
         # --- 3. Initial condition ---
         if initial_condition is None:
-            if self.dim == 1:
-                x_mid = (x_grid.max() + x_grid.min()) / 2
-                sigma = (x_grid.max() - x_grid.min()) / 10
-                initial_condition = lambda x: np.exp(-((x - x_mid) ** 2) / (2 * sigma**2)) * np.exp(1j * 2 * x)
-            else:
-                x_mid = (x_grid.max() + x_grid.min()) / 2
-                y_mid = (y_grid.max() + y_grid.min()) / 2
-                sigma = (x_grid.max() - x_grid.min()) / 10
-                initial_condition = lambda x, y: np.exp(-((x - x_mid)**2 + (y - y_mid)**2) / (2 * sigma**2)) * np.exp(1j * (2 * x + 1 * y))
+            raise ValueError(&#34;initial_condition is None. Please provide a function u₀(x) or u₀(x, y) as the initial condition.&#34;)
+        
         params[&#39;initial_condition&#39;] = initial_condition
         if is_second_order:
             params[&#39;initial_velocity&#39;] = initial_velocity
@@ -16967,15 +16953,8 @@ PDE is solved.</dd>
 
     # --- 3. Initial condition ---
     if initial_condition is None:
-        if self.dim == 1:
-            x_mid = (x_grid.max() + x_grid.min()) / 2
-            sigma = (x_grid.max() - x_grid.min()) / 10
-            initial_condition = lambda x: np.exp(-((x - x_mid) ** 2) / (2 * sigma**2)) * np.exp(1j * 2 * x)
-        else:
-            x_mid = (x_grid.max() + x_grid.min()) / 2
-            y_mid = (y_grid.max() + y_grid.min()) / 2
-            sigma = (x_grid.max() - x_grid.min()) / 10
-            initial_condition = lambda x, y: np.exp(-((x - x_mid)**2 + (y - y_mid)**2) / (2 * sigma**2)) * np.exp(1j * (2 * x + 1 * y))
+        raise ValueError(&#34;initial_condition is None. Please provide a function u₀(x) or u₀(x, y) as the initial condition.&#34;)
+    
     params[&#39;initial_condition&#39;] = initial_condition
     if is_second_order:
         params[&#39;initial_velocity&#39;] = initial_velocity

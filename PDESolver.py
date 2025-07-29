@@ -1625,15 +1625,8 @@ class PseudoDifferentialOperator:
     
         # --- 3. Initial condition ---
         if initial_condition is None:
-            if self.dim == 1:
-                x_mid = (x_grid.max() + x_grid.min()) / 2
-                sigma = (x_grid.max() - x_grid.min()) / 10
-                initial_condition = lambda x: np.exp(-((x - x_mid) ** 2) / (2 * sigma**2)) * np.exp(1j * 2 * x)
-            else:
-                x_mid = (x_grid.max() + x_grid.min()) / 2
-                y_mid = (y_grid.max() + y_grid.min()) / 2
-                sigma = (x_grid.max() - x_grid.min()) / 10
-                initial_condition = lambda x, y: np.exp(-((x - x_mid)**2 + (y - y_mid)**2) / (2 * sigma**2)) * np.exp(1j * (2 * x + 1 * y))
+            raise ValueError("initial_condition is None. Please provide a function u₀(x) or u₀(x, y) as the initial condition.")
+        
         params['initial_condition'] = initial_condition
         if is_second_order:
             params['initial_velocity'] = initial_velocity
@@ -5167,18 +5160,18 @@ class PDESolver:
             return ani
     
         else:  # dim == 2
-            fig = plt.figure(figsize=(12, 6))
+            fig = plt.figure(figsize=(14, 8))              
             ax = fig.add_subplot(111, projection='3d')
             ax.set_xlabel('x')
             ax.set_ylabel('y')
             ax.set_zlabel(f'{component.title()} of u')
+            ax.zaxis.labelpad = 0
             ax.set_title('Initial condition')
-    
+            
             data0 = get_component(self.frames[0])
             surf = [ax.plot_surface(self.X, self.Y, data0, cmap='viridis')]
-            plt.tight_layout()
             plt.show()
-    
+
             def update(frame_number):
                 frame = frame_indices[frame_number]
                 current_data = get_component(self.frames[frame])
