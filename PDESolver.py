@@ -229,10 +229,11 @@ from IPython.display import display, clear_output, HTML
 from ipywidgets import interact, FloatSlider, Dropdown, widgets
 from IPython.display import display, clear_output
 from itertools import product
+import os
 
     
 plt.rcParams['text.usetex'] = False
-FFT_WORKERS = 4
+FFT_WORKERS = max(1, os.cpu_count() // 2)
 
 class Op(Function):
     """Custom symbolic wrapper for pseudo-differential operators in Fourier space.
