@@ -115,14 +115,16 @@ HTML(ani.to_jshtml())
 
 ## 🧪 Test Notebooks
 
-| Notebook                               | Description                                                        |
-|----------------------------------------|--------------------------------------------------------------------|
-| `PDE_symbolic_tester.ipynb`            | Verifies symbolic parsing & solutions                              |
-| `PDESolver_psiOp_tester.ipynb`         | Tests `psiOp` visualization & symbolic analysis                    |
-| `PDESolver_tester_1D_periodic.ipynb`   | 1D periodic PDEs: heat, wave, fractional Laplacian, etc.           |
-| `PDESolver_tester_1D_Dirichlet.ipynb`  | 1D Dirichlet: Schrödinger, Airy, Hermite, Legendre, etc.           |
-| `PDESolver_tester_2D_periodic.ipynb`   | 2D periodic PDEs: wave, Klein–Gordon, diffusion, etc.              |
-| `PDESolver_tester_2D_Dirichlet.ipynb`  | 2D Dirichlet examples: Laplace, Helmholtz, Schrödinger             |
+| Notebook                               | Description                                                                                         |
+|----------------------------------------|-----------------------------------------------------------------------------------------------------|
+| `PDE_symbolic_tester.ipynb`            | Verifies symbolic parsing & solutions                                                               |
+| `psiOp_tester.ipynb`                   | Tests `psiOp` visualization & symbolic analysis                                                     |
+| `psiOp_quantization_evolution.ipynb`   | Tests `psiOp` quantization & evolution simulation                                                   |
+| `PDESolver_tester_1D_periodic.ipynb`   | 1D periodic : stationary, transport, heat, wave, Schrödinger,fractional Laplacian, Klein-Gordon...  |
+| `PDESolver_tester_1D_Dirichlet.ipynb`  | 1D Dirichlet: stationary, transport, heat, wave, Schrödinger, Airy, Hermite, Legendre...            |
+| `PDESolver_tester_2D_periodic.ipynb`   | 2D periodic : stationary, transport, heat, wave, Schrödinger,fractional Laplacian, Klein-Gordon...  |
+| `PDESolver_tester_2D_Dirichlet.ipynb`  | 2D Dirichlet: stationary, diffusion (just few examples due to memory consumption)                   |
+| `PDESolver_examples.ipynb`             | 1D periodic/Dirichlet: Ginzburg-Landau, Sine-Gordon, non-linear Schrödinger, Fisher-KPP equation... |
 
 Use them to explore features and validate new equations.
 
