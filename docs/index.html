@@ -60,7 +60,7 @@ making it suitable for both research and educational applications.</p>
 </li>
 <li><strong>Interactive Analysis</strong>:
 <ul>
-<li>Explore symbol properties (<code>|p(x, ξ)|</code>, group velocity, wavefront sets)
+<li>Explore symbol properties (<code>|p(x, ξ)|</code>, group velocity)
 </li>
 <li>Visualize Hamiltonian flows and characteristic sets
 </li>
@@ -139,7 +139,6 @@ HTML(ani.to_jshtml())
 <li>Symbol amplitude and phase</li>
 <li>Group velocity fields</li>
 <li>Hamiltonian flows</li>
-<li>Wavefront sets</li>
 <li>Characteristic sets</li>
 <li>Micro-support estimates</li>
 </ul>
@@ -205,7 +204,7 @@ for i in range(n_test + 1):
 <p>PDESolver is ideal for:</p>
 <ul>
 <li>Educational tools (visualization of PDE solutions and symbolic analysis)</li>
-<li>Microlocal analysis (wavefront sets, Hamiltonian flows)</li>
+<li>Microlocal analysis (Hamiltonian flows)</li>
 <li>Operator theory (pseudo-differential calculus, inversion, adjoints)</li>
 </ul>
 <h2 id="dependencies">Dependencies</h2>
@@ -258,7 +257,7 @@ Key Features
     - Periodic (via FFT)
     - Dirichlet (via pseudo-differential operator inversion)  
 - **Interactive Analysis**:  
-    - Explore symbol properties (`|p(x, ξ)|`, group velocity, wavefront sets)  
+    - Explore symbol properties (`|p(x, ξ)|`, group velocity)  
     - Visualize Hamiltonian flows and characteristic sets  
 - **Visualization**:  
     - Animate solutions in 1D/2D  
@@ -335,7 +334,6 @@ Use `interactive_symbol_analysis(pseudo_op)` to explore:
 - Symbol amplitude and phase
 - Group velocity fields
 - Hamiltonian flows
-- Wavefront sets
 - Characteristic sets
 - Micro-support estimates
 
@@ -405,7 +403,7 @@ Applications
 PDESolver is ideal for:
 
 - Educational tools (visualization of PDE solutions and symbolic analysis)
-- Microlocal analysis (wavefront sets, Hamiltonian flows)
+- Microlocal analysis (Hamiltonian flows)
 - Operator theory (pseudo-differential calculus, inversion, adjoints)
 
 Dependencies
@@ -1315,58 +1313,6 @@ class PseudoDifferentialOperator:
         p_star = self.formal_adjoint()
         return simplify(p - p_star).equals(0)
 
-    def visualize_wavefront(self, x_grid, xi_grid, y_grid=None, eta_grid=None, xi0=0.0, eta0=0.0):
-        &#34;&#34;&#34;
-        Visualize the wavefront set of the pseudo-differential operator&#39;s symbol by plotting |p(x, ξ)| or |p(x, y, ξ₀, η₀)|.
-    
-        The wavefront set captures the location and direction of singularities in the symbol p, which is crucial in 
-        microlocal analysis for understanding propagation of singularities and wave behavior.
-    
-        In 1D, this method displays |p(x, ξ)| over the phase space (x, ξ). In 2D, it fixes the frequency values (ξ₀, η₀)
-        and visualizes |p(x, y, ξ₀, η₀)| over the spatial domain to highlight where the symbol interacts with the fixed frequency.
-    
-        Parameters
-        ----------
-        x_grid : ndarray
-            1D array of spatial coordinates (x) used for evaluation.
-        xi_grid : ndarray
-            1D array of frequency coordinates (ξ) used for visualization in 1D or slicing in 2D.
-        y_grid : ndarray, optional
-            1D array of second spatial coordinate (y), used only in 2D.
-        eta_grid : ndarray, optional
-            1D array of second frequency coordinate (η), not directly used but kept for API consistency.
-        xi0 : float, default=0.0
-            Fixed value of ξ for slicing in 2D visualization.
-        eta0 : float, default=0.0
-            Fixed value of η for slicing in 2D visualization.
-    
-        Notes
-        -----
-        - In 1D:
-            Displays a 2D color map of |p(x, ξ)| over the phase space with axes (x, ξ).
-        - In 2D:
-            Evaluates and plots |p(x, y, ξ₀, η₀)| at fixed frequencies (ξ₀, η₀) over the spatial grid (x, y).
-        - Uses `imshow` for fast and scalable visualization with automatic aspect ratio adjustment.
-        - A colormap (&#39;viridis&#39;) is used to enhance contrast and readability of the magnitude variations.
-        &#34;&#34;&#34;
-        if self.dim == 1:
-            X, XI = np.meshgrid(x_grid, xi_grid)
-            symbol_vals = self.p_func(X, XI)
-            plt.imshow(np.abs(symbol_vals), extent=[xi_grid.min(), xi_grid.max(), x_grid.min(), x_grid.max()],
-                       aspect=&#39;auto&#39;, origin=&#39;lower&#39;, cmap=&#39;viridis&#39;)
-        elif self.dim == 2:
-            X, Y = np.meshgrid(x_grid, y_grid)
-            XI = np.full_like(X, xi0)
-            ETA = np.full_like(Y, eta0)
-            symbol_vals = self.p_func(X, Y, XI, ETA)
-            plt.imshow(np.abs(symbol_vals), extent=[x_grid.min(), x_grid.max(), y_grid.min(), y_grid.max()],
-                       aspect=&#39;auto&#39;, origin=&#39;lower&#39;, cmap=&#39;viridis&#39;)
-        plt.colorbar(label=&#39;|Symbol|&#39;)
-        plt.xlabel(&#39;ξ/Position&#39;)
-        plt.ylabel(&#39;η/Position&#39;)
-        plt.title(&#39;Wavefront Set&#39;)
-        plt.show()
-
     def visualize_fiber(self, x_grid, xi_grid, y0=0.0, x0=0.0):
         &#34;&#34;&#34;
         Plot the cotangent fiber structure at a fixed spatial point (x₀[, y₀]).
@@ -1518,7 +1464,7 @@ class PseudoDifferentialOperator:
         Visualize the characteristic set of the pseudo-differential symbol, defined as the approximate zero set p(x, ξ) ≈ 0.
     
         In microlocal analysis, the characteristic set is the locus of points in phase space (x, ξ) where the symbol p(x, ξ) vanishes,
-        playing a key role in understanding propagation of singularities and wavefronts.
+        playing a key role in understanding propagation of singularities.
     
         Parameters
         ----------
@@ -1634,175 +1580,56 @@ class PseudoDifferentialOperator:
             plt.grid(True)
             plt.show()
 
-    def visualize_dynamic_wavefront(self, x_grid, t_grid, y_grid=None, xi0=5.0, eta0=0.0):
-        &#34;&#34;&#34;
-        Create an animation of a monochromatic wave evolving under the pseudo-differential operator.
-
-        This method visualizes the time evolution of a wavefront governed by the symbol of the 
-        pseudo-differential operator. The wave is initialized as a monochromatic solution with 
-        fixed spatial frequencies and evolves according to the dispersion relation 
-        ω = p(x, ξ), where p is the symbol of the operator and (ξ, η) are spatial frequencies.
-
-        Parameters
-        ----------
-        x_grid : array_like
-            1D array representing the spatial grid in the x-direction.
-        t_grid : array_like
-            1D array of time points used to generate the animation frames.
-        y_grid : array_like, optional
-            1D array representing the spatial grid in the y-direction (required for 2D operators).
-        xi0 : float, optional
-            Initial spatial frequency in the x-direction. Default is 5.0.
-        eta0 : float, optional
-            Initial spatial frequency in the y-direction (used in 2D). Default is 0.0.
-
-        Returns
-        -------
-        matplotlib.animation.FuncAnimation
-            Animation object showing the time evolution of the monochromatic wave.
-
-        Notes
-        -----
-        - In 1D, visualizes the wave u(x, t) = cos(ξ₀·x − ω·t).
-        - In 2D, visualizes u(x, y, t) = cos(ξ₀·x + η₀·y − ω·t).
-        - The frequency ω is computed as the symbol evaluated at the fixed frequency components.
-        - If the symbol depends on space, it is evaluated at the origin (x=0, y=0).
-        
-        Raises
-        ------
-        ValueError
-            If `y_grid` is not provided while the operator is 2D.
-        NotImplementedError
-            If the spatial dimension of the operator is neither 1 nor 2.
-        &#34;&#34;&#34;
-
-        if self.dim == 1:
-            # Calculer omega a partir du symbole
-            from sympy import symbols, N
-            x = self.vars_x[0]
-            xi = symbols(&#39;xi&#39;, real=True)
-            try:
-                omega_symbolic = self.expr.subs({x: 0, xi: xi0})
-            except:
-                omega_symbolic = self.expr.subs(xi, xi0)
-                
-            omega_val = float(N(omega_symbolic.as_real_imag()[0]))
-    
-            # Preparer les donnees pour l&#39;animation
-            X, T = np.meshgrid(x_grid, t_grid, indexing=&#39;ij&#39;)
-            
-            # Initialiser la figure et l&#39;axe
-            fig, ax = plt.subplots()
-            ax.set_xlim(x_grid.min(), x_grid.max())
-            ax.set_ylim(-1.1, 1.1)
-            ax.set_xlabel(&#39;x&#39;)
-            ax.set_ylabel(&#39;u(x, t)&#39;)
-            ax.set_title(f&#39;Dynamic 1D Wavefront u(x, t) = cos({xi0}*x - {omega_val:.2f}*t)&#39;)
-            ax.grid(True)
-            
-            line, = ax.plot([], [], lw=2)
-            
-            # Pre-calculer les temps
-            T_vals = t_grid
-            
-            def animate(frame):
-                t = T_vals[frame] if frame &lt; len(T_vals) else T_vals[-1]
-                U = np.cos(xi0 * x_grid - omega_val * t)
-                line.set_data(x_grid, U)
-                ax.set_title(f&#39;Dynamic 1D Wavefront u(x, t) = cos({xi0}*x - {omega_val:.2f}*t) at t={t:.2f}&#39;)
-                return line,
-    
-            ani = animation.FuncAnimation(fig, animate, frames=len(T_vals), interval=50, blit=True, repeat=True)
-            plt.show()
-            return ani
-    
-        elif self.dim == 2:
-            # Calculer omega a partir du symbole
-            from sympy import symbols, N
-            x, y = self.vars_x
-            xi, eta = symbols(&#39;xi eta&#39;, real=True)
-            try:
-                omega_symbolic = self.expr.subs({x: 0, y: 0, xi: xi0, eta: eta0})
-            except:
-                omega_symbolic = self.expr.subs({xi: xi0, eta: eta0})
-                
-            omega_val = float(N(omega_symbolic.as_real_imag()[0]))
-    
-            if y_grid is None:
-                raise ValueError(&#34;y_grid must be provided for 2D visualization.&#34;)
-    
-            # Creer les grilles
-            X, Y = np.meshgrid(x_grid, y_grid, indexing=&#39;ij&#39;)
-            
-            # Initialiser la figure
-            fig, ax = plt.subplots()
-            ax.set_xlabel(&#39;x&#39;)
-            ax.set_ylabel(&#39;y&#39;)
-            
-            # Premiere frame
-            t0 = t_grid[0] if len(t_grid) &gt; 0 else 0.0
-            U = np.cos(xi0 * X + eta0 * Y - omega_val * t0)
-            extent = [x_grid.min(), x_grid.max(), y_grid.min(), y_grid.max()]
-            im = ax.imshow(U, extent=extent, aspect=&#39;equal&#39;, origin=&#39;lower&#39;, cmap=&#39;seismic&#39;, vmin=-1, vmax=1)
-            ax.set_title(f&#39;Dynamic 2D Wavefront at t={t0:.2f}&#39;)
-            fig.colorbar(im, ax=ax, label=&#39;u(x, y, t)&#39;)
-            
-            # Pre-calculer les temps
-            T_vals = t_grid
-            
-            def animate(frame):
-                t = T_vals[frame] if frame &lt; len(T_vals) else T_vals[-1]
-                U = np.cos(xi0 * X + eta0 * Y - omega_val * t)
-                im.set_array(U)
-                ax.set_title(f&#39;Dynamic 2D Wavefront at t={t:.2f}&#39;)
-                return [im]
-    
-            ani = animation.FuncAnimation(fig, animate, frames=len(T_vals), interval=50, blit=False, repeat=True)
-            plt.show()
-            return ani
-
-
     def simulate_evolution(self, x_grid, t_grid, y_grid=None,
                            initial_condition=None, initial_velocity=None,
                            solver_params=None, component=&#39;real&#39;):
         &#34;&#34;&#34;
-        Simulate and animate the time evolution of an initial condition under a pseudo-differential operator.
-
-        This method solves the PDE governed by the action of a pseudo-differential operator `p(x, D)`,
-        either as a first-order or second-order time evolution, and generates an animation of the resulting
-        wave propagation. The order of the PDE depends on whether an initial velocity is provided.
-
+        Simulate and animate the time evolution of a wave under this pseudo-differential operator.
+    
+        This method discretizes and numerically integrates either a first-order or
+        second-order in time PDE driven by the operator defined by `self.expr`. It supports
+        both 1D (only `x_grid`) and 2D (`x_grid` + `y_grid`) spatial domains with periodic
+        boundary conditions.
+    
         Parameters
         ----------
         x_grid : numpy.ndarray
-            Spatial grid in the x-direction.
+            1D array of spatial points along the x-axis.
         t_grid : numpy.ndarray
-            Temporal grid for the simulation.
+            1D array of time points at which the solution will be computed (and animated).
         y_grid : numpy.ndarray, optional
-            Spatial grid in the y-direction (used for 2D problems).
-        initial_condition : callable, optional
-            Function specifying the initial condition u₀(x) or u₀(x, y).
+            1D array of spatial points along the y-axis. If provided, runs a 2D simulation.
+        initial_condition : callable
+            Function u₀(x) or u₀(x, y) returning the initial field at each spatial point.
         initial_velocity : callable, optional
-            Function specifying the initial velocity ∂ₜu₀(x) or ∂ₜu₀(x, y). If provided, a second-order
-            PDE is solved.
+            Function ∂ₜu₀(x) or ∂ₜu₀(x, y). If given, solves the second-order wave equation,
+            otherwise solves the first-order evolution equation.
         solver_params : dict, optional
-            Additional keyword arguments passed to the PDE solver.
-        component : {&#39;real&#39;, &#39;imag&#39;, &#39;abs&#39;, &#39;angle&#39;}
-            Specifies which component of the solution to animate.
-
+            Extra keyword arguments passed to `PDESolver.setup()`, for example:
+            - `boundary_condition`: string (default “periodic”)
+            - `n_frames`: int, number of frames in the returned animation
+            - any other parameters accepted by `PDESolver.setup`.
+        component : {&#39;real&#39;, &#39;imag&#39;, &#39;abs&#39;, &#39;angle&#39;}, default &#39;real&#39;
+            Which component of the complex solution to animate.
+    
         Returns
         -------
         matplotlib.animation.FuncAnimation
-            Animation object showing the evolution of the solution over time.
-
+            An animation object showing the solution over time.
+    
+        Raises
+        ------
+        ValueError
+            If `initial_condition` is not provided.
+        NotImplementedError
+            If `self.dim` is not 1 or 2.
+    
         Notes
         -----
-        - Solves the PDE:
-            - First-order: ∂ₜu = -i ⋅ p(x, D) u
-            - Second-order: ∂²ₜu = -p(x, D)² u
-        - Supports 1D and 2D simulations depending on the presence of `y_grid`.
-        - The solution is animated using the specified component view.
-        - Useful for visualizing wave propagation and dispersive effects driven by pseudo-differential operators.
+        - First-order evolution: ∂ₜu = p(x,D) u  
+        - Second-order (wave) equation: ∂²ₜu = p(x,D) u  
+        - Builds a `PDESolver` from a symbolic Sympy equation, sets up a spectral grid,
+          steps forward in time, and animates the selected component.
         &#34;&#34;&#34;
         if solver_params is None:
             solver_params = {}
@@ -2076,7 +1903,7 @@ class PseudoDifferentialOperator:
         - This method evaluates the symbol p(x, ξ) over a grid and plots its reciprocal to emphasize 
           regions where the symbol is near zero.
         - A small constant (1e-10) is added to the denominator to avoid division by zero.
-        - The resulting plot helps identify characteristic sets and wavefront set approximations.
+        - The resulting plot helps identify characteristic sets.
         &#34;&#34;&#34;
         if self.dim != 1:
             raise NotImplementedError(&#34;Only 1D micro-support visualization implemented.&#34;)
@@ -2358,8 +2185,7 @@ class PseudoDifferentialOperator:
     
         This function provides a user-friendly interface to visualize various aspects of the pseudo-differential operator&#39;s symbol.
         It supports multiple visualization modes in both 1D and 2D, including group velocity fields, micro-support estimates,
-        symplectic vector fields, symbol amplitude/phase, cotangent fiber structure, characteristic sets, wavefront sets,
-        and Hamiltonian flows.
+        symplectic vector fields, symbol amplitude/phase, cotangent fiber structure, characteristic sets and Hamiltonian flows.
     
         Parameters
         ----------
@@ -2386,7 +2212,6 @@ class PseudoDifferentialOperator:
             &#39;Cotangent Fiber&#39;            : Structure of symbol over frequency space at fixed x
             &#39;Characteristic Set&#39;         : Zero set approximation {p ≈ 0}
             &#39;Characteristic Gradient&#39;    : |∇p(x, ξ)| or |∇p(x₀, y₀, ξ, η)|
-            &#39;Wavefront Set&#39;              : High-frequency singularities detected via symbol interaction
             &#39;Hamiltonian Flow&#39;           : Trajectories generated by the Hamiltonian vector field
     
         Raises
@@ -2412,7 +2237,6 @@ class PseudoDifferentialOperator:
                 &#39;Cotangent Fiber&#39;,
                 &#39;Characteristic Set&#39;,
                 &#39;Characteristic Gradient&#39;,
-                &#39;Wavefront Set&#39;,
                 &#39;Hamiltonian Flow&#39;,
             ],
             value=&#39;Group Velocity Field&#39;,
@@ -2466,9 +2290,6 @@ class PseudoDifferentialOperator:
     
                 elif mode == &#39;Characteristic Gradient&#39;:
                     pseudo_op.visualize_characteristic_gradient(x_vals, np.linspace(*xi_range, density), x0=x0)
-    
-                elif mode == &#39;Wavefront Set&#39;:
-                    pseudo_op.visualize_wavefront(x_vals, np.linspace(*xi_range, density), xi0=xi0)
     
                 elif mode == &#39;Hamiltonian Flow&#39;:
                     pseudo_op.plot_hamiltonian_flow(x0=x0, xi0=xi0)
@@ -2528,10 +2349,6 @@ class PseudoDifferentialOperator:
                     pseudo_op.visualize_characteristic_gradient(x_grid=x_vals, xi_grid=np.linspace(*xi_range, density),
                                                   y_grid=y_vals, eta_grid=np.linspace(*eta_range, density), x0=x0, y0=y0)
     
-                elif mode == &#39;Wavefront Set&#39;:
-                    pseudo_op.visualize_wavefront(x_grid=x_vals, xi_grid=np.linspace(*xi_range, density),
-                                                  y_grid=y_vals, eta_grid=np.linspace(*eta_range, density), xi0=xi0, eta0=eta0)
-    
                 elif mode == &#39;Hamiltonian Flow&#39;:
                     pseudo_op.plot_hamiltonian_flow(x0=x0, y0=y0, xi0=xi0, eta0=eta0)
                     
@@ -2561,7 +2378,7 @@ class PDESolver:
     - Built-in tools for:
         - Visualization of solutions and error surfaces
         - Symbol analysis of linear and pseudo-differential operators
-        - Microlocal analysis (e.g., wavefront set estimation, Hamiltonian flows)
+        - Microlocal analysis (e.g., Hamiltonian flows)
         - CFL condition checking and numerical stability diagnostics
 
     Supported Operators:
@@ -3123,8 +2940,8 @@ class PDESolver:
         - Frequency arrays (`KX`, `KY`) are defined following standard spectral conventions.
         - Dealiasing is applied using a sharp cutoff filter at a fraction of the maximum frequency.
         - For second-order equations, initial acceleration is derived from the governing operator.
-        - Symbolic analysis includes plotting of the symbol&#39;s real/imaginary/absolute values,
-          wavefront propagation, and dispersion relation.
+        - Symbolic analysis includes plotting of the symbol&#39;s real/imaginary/absolute values
+          and dispersion relation.
     
         See Also
         --------
@@ -3133,7 +2950,7 @@ class PDESolver:
         initialize_conditions : Applies initial data and enforces compatibility.
         check_cfl_condition : Verifies time step against stability constraints.
         plot_symbol : Visualizes the linear operator’s symbol in frequency space.
-        analyze_wave_propagation : Analyzes group velocity and wavefront dynamics.
+        analyze_wave_propagation : Analyzes group velocity.
         interactive_symbol_analysis : Interactive tools for ψOp-based equations.
         &#34;&#34;&#34;
         
@@ -5638,7 +5455,7 @@ It is designed for both <strong>linear and nonlinear time-dependent PDEs</strong
 <li>Built-in tools for:<ul>
 <li>Visualization of solutions and error surfaces</li>
 <li>Symbol analysis of linear and pseudo-differential operators</li>
-<li>Microlocal analysis (e.g., wavefront set estimation, Hamiltonian flows)</li>
+<li>Microlocal analysis (e.g., Hamiltonian flows)</li>
 <li>CFL condition checking and numerical stability diagnostics</li>
 </ul>
 </li>
@@ -5734,7 +5551,7 @@ if unsupported dimensions are detected, or invalid dependencies.</dd>
     - Built-in tools for:
         - Visualization of solutions and error surfaces
         - Symbol analysis of linear and pseudo-differential operators
-        - Microlocal analysis (e.g., wavefront set estimation, Hamiltonian flows)
+        - Microlocal analysis (e.g., Hamiltonian flows)
         - CFL condition checking and numerical stability diagnostics
 
     Supported Operators:
@@ -6296,8 +6113,8 @@ if unsupported dimensions are detected, or invalid dependencies.</dd>
         - Frequency arrays (`KX`, `KY`) are defined following standard spectral conventions.
         - Dealiasing is applied using a sharp cutoff filter at a fraction of the maximum frequency.
         - For second-order equations, initial acceleration is derived from the governing operator.
-        - Symbolic analysis includes plotting of the symbol&#39;s real/imaginary/absolute values,
-          wavefront propagation, and dispersion relation.
+        - Symbolic analysis includes plotting of the symbol&#39;s real/imaginary/absolute values
+          and dispersion relation.
     
         See Also
         --------
@@ -6306,7 +6123,7 @@ if unsupported dimensions are detected, or invalid dependencies.</dd>
         initialize_conditions : Applies initial data and enforces compatibility.
         check_cfl_condition : Verifies time step against stability constraints.
         plot_symbol : Visualizes the linear operator’s symbol in frequency space.
-        analyze_wave_propagation : Analyzes group velocity and wavefront dynamics.
+        analyze_wave_propagation : Analyzes group velocity.
         interactive_symbol_analysis : Interactive tools for ψOp-based equations.
         &#34;&#34;&#34;
         
@@ -11345,8 +11162,8 @@ required for second-order equations.</dd>
 <li>Frequency arrays (<code>KX</code>, <code>KY</code>) are defined following standard spectral conventions.</li>
 <li>Dealiasing is applied using a sharp cutoff filter at a fraction of the maximum frequency.</li>
 <li>For second-order equations, initial acceleration is derived from the governing operator.</li>
-<li>Symbolic analysis includes plotting of the symbol's real/imaginary/absolute values,
-wavefront propagation, and dispersion relation.</li>
+<li>Symbolic analysis includes plotting of the symbol's real/imaginary/absolute values
+and dispersion relation.</li>
 </ul>
 <h2 id="see-also">See Also</h2>
 <dl>
@@ -11361,7 +11178,7 @@ wavefront propagation, and dispersion relation.</li>
 <dt><code>plot_symbol</code></dt>
 <dd>Visualizes the linear operator’s symbol in frequency space.</dd>
 <dt><code>analyze_wave_propagation</code></dt>
-<dd>Analyzes group velocity and wavefront dynamics.</dd>
+<dd>Analyzes group velocity.</dd>
 <dt><code>interactive_symbol_analysis</code></dt>
 <dd>Interactive tools for ψOp-based equations.</dd>
 </dl></div>
@@ -11419,8 +11236,8 @@ wavefront propagation, and dispersion relation.</li>
     - Frequency arrays (`KX`, `KY`) are defined following standard spectral conventions.
     - Dealiasing is applied using a sharp cutoff filter at a fraction of the maximum frequency.
     - For second-order equations, initial acceleration is derived from the governing operator.
-    - Symbolic analysis includes plotting of the symbol&#39;s real/imaginary/absolute values,
-      wavefront propagation, and dispersion relation.
+    - Symbolic analysis includes plotting of the symbol&#39;s real/imaginary/absolute values
+      and dispersion relation.
 
     See Also
     --------
@@ -11429,7 +11246,7 @@ wavefront propagation, and dispersion relation.</li>
     initialize_conditions : Applies initial data and enforces compatibility.
     check_cfl_condition : Verifies time step against stability constraints.
     plot_symbol : Visualizes the linear operator’s symbol in frequency space.
-    analyze_wave_propagation : Analyzes group velocity and wavefront dynamics.
+    analyze_wave_propagation : Analyzes group velocity.
     interactive_symbol_analysis : Interactive tools for ψOp-based equations.
     &#34;&#34;&#34;
     
@@ -13920,58 +13737,6 @@ or extracted automatically from symbolic equations (auto mode).</p>
         p_star = self.formal_adjoint()
         return simplify(p - p_star).equals(0)
 
-    def visualize_wavefront(self, x_grid, xi_grid, y_grid=None, eta_grid=None, xi0=0.0, eta0=0.0):
-        &#34;&#34;&#34;
-        Visualize the wavefront set of the pseudo-differential operator&#39;s symbol by plotting |p(x, ξ)| or |p(x, y, ξ₀, η₀)|.
-    
-        The wavefront set captures the location and direction of singularities in the symbol p, which is crucial in 
-        microlocal analysis for understanding propagation of singularities and wave behavior.
-    
-        In 1D, this method displays |p(x, ξ)| over the phase space (x, ξ). In 2D, it fixes the frequency values (ξ₀, η₀)
-        and visualizes |p(x, y, ξ₀, η₀)| over the spatial domain to highlight where the symbol interacts with the fixed frequency.
-    
-        Parameters
-        ----------
-        x_grid : ndarray
-            1D array of spatial coordinates (x) used for evaluation.
-        xi_grid : ndarray
-            1D array of frequency coordinates (ξ) used for visualization in 1D or slicing in 2D.
-        y_grid : ndarray, optional
-            1D array of second spatial coordinate (y), used only in 2D.
-        eta_grid : ndarray, optional
-            1D array of second frequency coordinate (η), not directly used but kept for API consistency.
-        xi0 : float, default=0.0
-            Fixed value of ξ for slicing in 2D visualization.
-        eta0 : float, default=0.0
-            Fixed value of η for slicing in 2D visualization.
-    
-        Notes
-        -----
-        - In 1D:
-            Displays a 2D color map of |p(x, ξ)| over the phase space with axes (x, ξ).
-        - In 2D:
-            Evaluates and plots |p(x, y, ξ₀, η₀)| at fixed frequencies (ξ₀, η₀) over the spatial grid (x, y).
-        - Uses `imshow` for fast and scalable visualization with automatic aspect ratio adjustment.
-        - A colormap (&#39;viridis&#39;) is used to enhance contrast and readability of the magnitude variations.
-        &#34;&#34;&#34;
-        if self.dim == 1:
-            X, XI = np.meshgrid(x_grid, xi_grid)
-            symbol_vals = self.p_func(X, XI)
-            plt.imshow(np.abs(symbol_vals), extent=[xi_grid.min(), xi_grid.max(), x_grid.min(), x_grid.max()],
-                       aspect=&#39;auto&#39;, origin=&#39;lower&#39;, cmap=&#39;viridis&#39;)
-        elif self.dim == 2:
-            X, Y = np.meshgrid(x_grid, y_grid)
-            XI = np.full_like(X, xi0)
-            ETA = np.full_like(Y, eta0)
-            symbol_vals = self.p_func(X, Y, XI, ETA)
-            plt.imshow(np.abs(symbol_vals), extent=[x_grid.min(), x_grid.max(), y_grid.min(), y_grid.max()],
-                       aspect=&#39;auto&#39;, origin=&#39;lower&#39;, cmap=&#39;viridis&#39;)
-        plt.colorbar(label=&#39;|Symbol|&#39;)
-        plt.xlabel(&#39;ξ/Position&#39;)
-        plt.ylabel(&#39;η/Position&#39;)
-        plt.title(&#39;Wavefront Set&#39;)
-        plt.show()
-
     def visualize_fiber(self, x_grid, xi_grid, y0=0.0, x0=0.0):
         &#34;&#34;&#34;
         Plot the cotangent fiber structure at a fixed spatial point (x₀[, y₀]).
@@ -14123,7 +13888,7 @@ or extracted automatically from symbolic equations (auto mode).</p>
         Visualize the characteristic set of the pseudo-differential symbol, defined as the approximate zero set p(x, ξ) ≈ 0.
     
         In microlocal analysis, the characteristic set is the locus of points in phase space (x, ξ) where the symbol p(x, ξ) vanishes,
-        playing a key role in understanding propagation of singularities and wavefronts.
+        playing a key role in understanding propagation of singularities.
     
         Parameters
         ----------
@@ -14239,175 +14004,56 @@ or extracted automatically from symbolic equations (auto mode).</p>
             plt.grid(True)
             plt.show()
 
-    def visualize_dynamic_wavefront(self, x_grid, t_grid, y_grid=None, xi0=5.0, eta0=0.0):
-        &#34;&#34;&#34;
-        Create an animation of a monochromatic wave evolving under the pseudo-differential operator.
-
-        This method visualizes the time evolution of a wavefront governed by the symbol of the 
-        pseudo-differential operator. The wave is initialized as a monochromatic solution with 
-        fixed spatial frequencies and evolves according to the dispersion relation 
-        ω = p(x, ξ), where p is the symbol of the operator and (ξ, η) are spatial frequencies.
-
-        Parameters
-        ----------
-        x_grid : array_like
-            1D array representing the spatial grid in the x-direction.
-        t_grid : array_like
-            1D array of time points used to generate the animation frames.
-        y_grid : array_like, optional
-            1D array representing the spatial grid in the y-direction (required for 2D operators).
-        xi0 : float, optional
-            Initial spatial frequency in the x-direction. Default is 5.0.
-        eta0 : float, optional
-            Initial spatial frequency in the y-direction (used in 2D). Default is 0.0.
-
-        Returns
-        -------
-        matplotlib.animation.FuncAnimation
-            Animation object showing the time evolution of the monochromatic wave.
-
-        Notes
-        -----
-        - In 1D, visualizes the wave u(x, t) = cos(ξ₀·x − ω·t).
-        - In 2D, visualizes u(x, y, t) = cos(ξ₀·x + η₀·y − ω·t).
-        - The frequency ω is computed as the symbol evaluated at the fixed frequency components.
-        - If the symbol depends on space, it is evaluated at the origin (x=0, y=0).
-        
-        Raises
-        ------
-        ValueError
-            If `y_grid` is not provided while the operator is 2D.
-        NotImplementedError
-            If the spatial dimension of the operator is neither 1 nor 2.
-        &#34;&#34;&#34;
-
-        if self.dim == 1:
-            # Calculer omega a partir du symbole
-            from sympy import symbols, N
-            x = self.vars_x[0]
-            xi = symbols(&#39;xi&#39;, real=True)
-            try:
-                omega_symbolic = self.expr.subs({x: 0, xi: xi0})
-            except:
-                omega_symbolic = self.expr.subs(xi, xi0)
-                
-            omega_val = float(N(omega_symbolic.as_real_imag()[0]))
-    
-            # Preparer les donnees pour l&#39;animation
-            X, T = np.meshgrid(x_grid, t_grid, indexing=&#39;ij&#39;)
-            
-            # Initialiser la figure et l&#39;axe
-            fig, ax = plt.subplots()
-            ax.set_xlim(x_grid.min(), x_grid.max())
-            ax.set_ylim(-1.1, 1.1)
-            ax.set_xlabel(&#39;x&#39;)
-            ax.set_ylabel(&#39;u(x, t)&#39;)
-            ax.set_title(f&#39;Dynamic 1D Wavefront u(x, t) = cos({xi0}*x - {omega_val:.2f}*t)&#39;)
-            ax.grid(True)
-            
-            line, = ax.plot([], [], lw=2)
-            
-            # Pre-calculer les temps
-            T_vals = t_grid
-            
-            def animate(frame):
-                t = T_vals[frame] if frame &lt; len(T_vals) else T_vals[-1]
-                U = np.cos(xi0 * x_grid - omega_val * t)
-                line.set_data(x_grid, U)
-                ax.set_title(f&#39;Dynamic 1D Wavefront u(x, t) = cos({xi0}*x - {omega_val:.2f}*t) at t={t:.2f}&#39;)
-                return line,
-    
-            ani = animation.FuncAnimation(fig, animate, frames=len(T_vals), interval=50, blit=True, repeat=True)
-            plt.show()
-            return ani
-    
-        elif self.dim == 2:
-            # Calculer omega a partir du symbole
-            from sympy import symbols, N
-            x, y = self.vars_x
-            xi, eta = symbols(&#39;xi eta&#39;, real=True)
-            try:
-                omega_symbolic = self.expr.subs({x: 0, y: 0, xi: xi0, eta: eta0})
-            except:
-                omega_symbolic = self.expr.subs({xi: xi0, eta: eta0})
-                
-            omega_val = float(N(omega_symbolic.as_real_imag()[0]))
-    
-            if y_grid is None:
-                raise ValueError(&#34;y_grid must be provided for 2D visualization.&#34;)
-    
-            # Creer les grilles
-            X, Y = np.meshgrid(x_grid, y_grid, indexing=&#39;ij&#39;)
-            
-            # Initialiser la figure
-            fig, ax = plt.subplots()
-            ax.set_xlabel(&#39;x&#39;)
-            ax.set_ylabel(&#39;y&#39;)
-            
-            # Premiere frame
-            t0 = t_grid[0] if len(t_grid) &gt; 0 else 0.0
-            U = np.cos(xi0 * X + eta0 * Y - omega_val * t0)
-            extent = [x_grid.min(), x_grid.max(), y_grid.min(), y_grid.max()]
-            im = ax.imshow(U, extent=extent, aspect=&#39;equal&#39;, origin=&#39;lower&#39;, cmap=&#39;seismic&#39;, vmin=-1, vmax=1)
-            ax.set_title(f&#39;Dynamic 2D Wavefront at t={t0:.2f}&#39;)
-            fig.colorbar(im, ax=ax, label=&#39;u(x, y, t)&#39;)
-            
-            # Pre-calculer les temps
-            T_vals = t_grid
-            
-            def animate(frame):
-                t = T_vals[frame] if frame &lt; len(T_vals) else T_vals[-1]
-                U = np.cos(xi0 * X + eta0 * Y - omega_val * t)
-                im.set_array(U)
-                ax.set_title(f&#39;Dynamic 2D Wavefront at t={t:.2f}&#39;)
-                return [im]
-    
-            ani = animation.FuncAnimation(fig, animate, frames=len(T_vals), interval=50, blit=False, repeat=True)
-            plt.show()
-            return ani
-
-
     def simulate_evolution(self, x_grid, t_grid, y_grid=None,
                            initial_condition=None, initial_velocity=None,
                            solver_params=None, component=&#39;real&#39;):
         &#34;&#34;&#34;
-        Simulate and animate the time evolution of an initial condition under a pseudo-differential operator.
-
-        This method solves the PDE governed by the action of a pseudo-differential operator `p(x, D)`,
-        either as a first-order or second-order time evolution, and generates an animation of the resulting
-        wave propagation. The order of the PDE depends on whether an initial velocity is provided.
-
+        Simulate and animate the time evolution of a wave under this pseudo-differential operator.
+    
+        This method discretizes and numerically integrates either a first-order or
+        second-order in time PDE driven by the operator defined by `self.expr`. It supports
+        both 1D (only `x_grid`) and 2D (`x_grid` + `y_grid`) spatial domains with periodic
+        boundary conditions.
+    
         Parameters
         ----------
         x_grid : numpy.ndarray
-            Spatial grid in the x-direction.
+            1D array of spatial points along the x-axis.
         t_grid : numpy.ndarray
-            Temporal grid for the simulation.
+            1D array of time points at which the solution will be computed (and animated).
         y_grid : numpy.ndarray, optional
-            Spatial grid in the y-direction (used for 2D problems).
-        initial_condition : callable, optional
-            Function specifying the initial condition u₀(x) or u₀(x, y).
+            1D array of spatial points along the y-axis. If provided, runs a 2D simulation.
+        initial_condition : callable
+            Function u₀(x) or u₀(x, y) returning the initial field at each spatial point.
         initial_velocity : callable, optional
-            Function specifying the initial velocity ∂ₜu₀(x) or ∂ₜu₀(x, y). If provided, a second-order
-            PDE is solved.
+            Function ∂ₜu₀(x) or ∂ₜu₀(x, y). If given, solves the second-order wave equation,
+            otherwise solves the first-order evolution equation.
         solver_params : dict, optional
-            Additional keyword arguments passed to the PDE solver.
-        component : {&#39;real&#39;, &#39;imag&#39;, &#39;abs&#39;, &#39;angle&#39;}
-            Specifies which component of the solution to animate.
-
+            Extra keyword arguments passed to `PDESolver.setup()`, for example:
+            - `boundary_condition`: string (default “periodic”)
+            - `n_frames`: int, number of frames in the returned animation
+            - any other parameters accepted by `PDESolver.setup`.
+        component : {&#39;real&#39;, &#39;imag&#39;, &#39;abs&#39;, &#39;angle&#39;}, default &#39;real&#39;
+            Which component of the complex solution to animate.
+    
         Returns
         -------
         matplotlib.animation.FuncAnimation
-            Animation object showing the evolution of the solution over time.
-
+            An animation object showing the solution over time.
+    
+        Raises
+        ------
+        ValueError
+            If `initial_condition` is not provided.
+        NotImplementedError
+            If `self.dim` is not 1 or 2.
+    
         Notes
         -----
-        - Solves the PDE:
-            - First-order: ∂ₜu = -i ⋅ p(x, D) u
-            - Second-order: ∂²ₜu = -p(x, D)² u
-        - Supports 1D and 2D simulations depending on the presence of `y_grid`.
-        - The solution is animated using the specified component view.
-        - Useful for visualizing wave propagation and dispersive effects driven by pseudo-differential operators.
+        - First-order evolution: ∂ₜu = p(x,D) u  
+        - Second-order (wave) equation: ∂²ₜu = p(x,D) u  
+        - Builds a `PDESolver` from a symbolic Sympy equation, sets up a spectral grid,
+          steps forward in time, and animates the selected component.
         &#34;&#34;&#34;
         if solver_params is None:
             solver_params = {}
@@ -14681,7 +14327,7 @@ or extracted automatically from symbolic equations (auto mode).</p>
         - This method evaluates the symbol p(x, ξ) over a grid and plots its reciprocal to emphasize 
           regions where the symbol is near zero.
         - A small constant (1e-10) is added to the denominator to avoid division by zero.
-        - The resulting plot helps identify characteristic sets and wavefront set approximations.
+        - The resulting plot helps identify characteristic sets.
         &#34;&#34;&#34;
         if self.dim != 1:
             raise NotImplementedError(&#34;Only 1D micro-support visualization implemented.&#34;)
@@ -14963,8 +14609,7 @@ or extracted automatically from symbolic equations (auto mode).</p>
     
         This function provides a user-friendly interface to visualize various aspects of the pseudo-differential operator&#39;s symbol.
         It supports multiple visualization modes in both 1D and 2D, including group velocity fields, micro-support estimates,
-        symplectic vector fields, symbol amplitude/phase, cotangent fiber structure, characteristic sets, wavefront sets,
-        and Hamiltonian flows.
+        symplectic vector fields, symbol amplitude/phase, cotangent fiber structure, characteristic sets and Hamiltonian flows.
     
         Parameters
         ----------
@@ -14991,7 +14636,6 @@ or extracted automatically from symbolic equations (auto mode).</p>
             &#39;Cotangent Fiber&#39;            : Structure of symbol over frequency space at fixed x
             &#39;Characteristic Set&#39;         : Zero set approximation {p ≈ 0}
             &#39;Characteristic Gradient&#39;    : |∇p(x, ξ)| or |∇p(x₀, y₀, ξ, η)|
-            &#39;Wavefront Set&#39;              : High-frequency singularities detected via symbol interaction
             &#39;Hamiltonian Flow&#39;           : Trajectories generated by the Hamiltonian vector field
     
         Raises
@@ -15017,7 +14661,6 @@ or extracted automatically from symbolic equations (auto mode).</p>
                 &#39;Cotangent Fiber&#39;,
                 &#39;Characteristic Set&#39;,
                 &#39;Characteristic Gradient&#39;,
-                &#39;Wavefront Set&#39;,
                 &#39;Hamiltonian Flow&#39;,
             ],
             value=&#39;Group Velocity Field&#39;,
@@ -15071,9 +14714,6 @@ or extracted automatically from symbolic equations (auto mode).</p>
     
                 elif mode == &#39;Characteristic Gradient&#39;:
                     pseudo_op.visualize_characteristic_gradient(x_vals, np.linspace(*xi_range, density), x0=x0)
-    
-                elif mode == &#39;Wavefront Set&#39;:
-                    pseudo_op.visualize_wavefront(x_vals, np.linspace(*xi_range, density), xi0=xi0)
     
                 elif mode == &#39;Hamiltonian Flow&#39;:
                     pseudo_op.plot_hamiltonian_flow(x0=x0, xi0=xi0)
@@ -15132,10 +14772,6 @@ or extracted automatically from symbolic equations (auto mode).</p>
                 elif mode == &#39;Characteristic Gradient&#39;:
                     pseudo_op.visualize_characteristic_gradient(x_grid=x_vals, xi_grid=np.linspace(*xi_range, density),
                                                   y_grid=y_vals, eta_grid=np.linspace(*eta_range, density), x0=x0, y0=y0)
-    
-                elif mode == &#39;Wavefront Set&#39;:
-                    pseudo_op.visualize_wavefront(x_grid=x_vals, xi_grid=np.linspace(*xi_range, density),
-                                                  y_grid=y_vals, eta_grid=np.linspace(*eta_range, density), xi0=xi0, eta0=eta0)
     
                 elif mode == &#39;Hamiltonian Flow&#39;:
                     pseudo_op.plot_hamiltonian_flow(x0=x0, y0=y0, xi0=xi0, eta0=eta0)
@@ -15848,8 +15484,7 @@ to the frequency variable ξ.</p>
 <div class="desc"><p>Launch an interactive dashboard for symbol exploration using ipywidgets.</p>
 <p>This function provides a user-friendly interface to visualize various aspects of the pseudo-differential operator's symbol.
 It supports multiple visualization modes in both 1D and 2D, including group velocity fields, micro-support estimates,
-symplectic vector fields, symbol amplitude/phase, cotangent fiber structure, characteristic sets, wavefront sets,
-and Hamiltonian flows.</p>
+symplectic vector fields, symbol amplitude/phase, cotangent fiber structure, characteristic sets and Hamiltonian flows.</p>
 <h2 id="parameters">Parameters</h2>
 <dl>
 <dt><strong><code>pseudo_op</code></strong> :&ensp;<code><a title="PDESolver.PseudoDifferentialOperator" href="#PDESolver.PseudoDifferentialOperator">PseudoDifferentialOperator</a></code></dt>
@@ -15883,8 +15518,6 @@ and Hamiltonian flows.</p>
 : Zero set approximation {p ≈ 0}
 'Characteristic Gradient'
 : |∇p(x, ξ)| or |∇p(x₀, y₀, ξ, η)|
-'Wavefront Set'
-: High-frequency singularities detected via symbol interaction
 'Hamiltonian Flow'
 : Trajectories generated by the Hamiltonian vector field</li>
 </ul>
@@ -15908,8 +15541,7 @@ and Hamiltonian flows.</p>
 
     This function provides a user-friendly interface to visualize various aspects of the pseudo-differential operator&#39;s symbol.
     It supports multiple visualization modes in both 1D and 2D, including group velocity fields, micro-support estimates,
-    symplectic vector fields, symbol amplitude/phase, cotangent fiber structure, characteristic sets, wavefront sets,
-    and Hamiltonian flows.
+    symplectic vector fields, symbol amplitude/phase, cotangent fiber structure, characteristic sets and Hamiltonian flows.
 
     Parameters
     ----------
@@ -15936,7 +15568,6 @@ and Hamiltonian flows.</p>
         &#39;Cotangent Fiber&#39;            : Structure of symbol over frequency space at fixed x
         &#39;Characteristic Set&#39;         : Zero set approximation {p ≈ 0}
         &#39;Characteristic Gradient&#39;    : |∇p(x, ξ)| or |∇p(x₀, y₀, ξ, η)|
-        &#39;Wavefront Set&#39;              : High-frequency singularities detected via symbol interaction
         &#39;Hamiltonian Flow&#39;           : Trajectories generated by the Hamiltonian vector field
 
     Raises
@@ -15962,7 +15593,6 @@ and Hamiltonian flows.</p>
             &#39;Cotangent Fiber&#39;,
             &#39;Characteristic Set&#39;,
             &#39;Characteristic Gradient&#39;,
-            &#39;Wavefront Set&#39;,
             &#39;Hamiltonian Flow&#39;,
         ],
         value=&#39;Group Velocity Field&#39;,
@@ -16016,9 +15646,6 @@ and Hamiltonian flows.</p>
 
             elif mode == &#39;Characteristic Gradient&#39;:
                 pseudo_op.visualize_characteristic_gradient(x_vals, np.linspace(*xi_range, density), x0=x0)
-
-            elif mode == &#39;Wavefront Set&#39;:
-                pseudo_op.visualize_wavefront(x_vals, np.linspace(*xi_range, density), xi0=xi0)
 
             elif mode == &#39;Hamiltonian Flow&#39;:
                 pseudo_op.plot_hamiltonian_flow(x0=x0, xi0=xi0)
@@ -16077,10 +15704,6 @@ and Hamiltonian flows.</p>
             elif mode == &#39;Characteristic Gradient&#39;:
                 pseudo_op.visualize_characteristic_gradient(x_grid=x_vals, xi_grid=np.linspace(*xi_range, density),
                                               y_grid=y_vals, eta_grid=np.linspace(*eta_range, density), x0=x0, y0=y0)
-
-            elif mode == &#39;Wavefront Set&#39;:
-                pseudo_op.visualize_wavefront(x_grid=x_vals, xi_grid=np.linspace(*xi_range, density),
-                                              y_grid=y_vals, eta_grid=np.linspace(*eta_range, density), xi0=xi0, eta0=eta0)
 
             elif mode == &#39;Hamiltonian Flow&#39;:
                 pseudo_op.plot_hamiltonian_flow(x0=x0, y0=y0, xi0=xi0, eta0=eta0)
@@ -16826,43 +16449,52 @@ between the operator P and the current approximation of R.</li>
 <span>def <span class="ident">simulate_evolution</span></span>(<span>self, x_grid, t_grid, y_grid=None, initial_condition=None, initial_velocity=None, solver_params=None, component='real')</span>
 </code></dt>
 <dd>
-<div class="desc"><p>Simulate and animate the time evolution of an initial condition under a pseudo-differential operator.</p>
-<p>This method solves the PDE governed by the action of a pseudo-differential operator <code>p(x, D)</code>,
-either as a first-order or second-order time evolution, and generates an animation of the resulting
-wave propagation. The order of the PDE depends on whether an initial velocity is provided.</p>
+<div class="desc"><p>Simulate and animate the time evolution of a wave under this pseudo-differential operator.</p>
+<p>This method discretizes and numerically integrates either a first-order or
+second-order in time PDE driven by the operator defined by <code>self.expr</code>. It supports
+both 1D (only <code>x_grid</code>) and 2D (<code>x_grid</code> + <code>y_grid</code>) spatial domains with periodic
+boundary conditions.</p>
 <h2 id="parameters">Parameters</h2>
 <dl>
 <dt><strong><code>x_grid</code></strong> :&ensp;<code>numpy.ndarray</code></dt>
-<dd>Spatial grid in the x-direction.</dd>
+<dd>1D array of spatial points along the x-axis.</dd>
 <dt><strong><code>t_grid</code></strong> :&ensp;<code>numpy.ndarray</code></dt>
-<dd>Temporal grid for the simulation.</dd>
+<dd>1D array of time points at which the solution will be computed (and animated).</dd>
 <dt><strong><code>y_grid</code></strong> :&ensp;<code>numpy.ndarray</code>, optional</dt>
-<dd>Spatial grid in the y-direction (used for 2D problems).</dd>
-<dt><strong><code>initial_condition</code></strong> :&ensp;<code>callable</code>, optional</dt>
-<dd>Function specifying the initial condition u₀(x) or u₀(x, y).</dd>
+<dd>1D array of spatial points along the y-axis. If provided, runs a 2D simulation.</dd>
+<dt><strong><code>initial_condition</code></strong> :&ensp;<code>callable</code></dt>
+<dd>Function u₀(x) or u₀(x, y) returning the initial field at each spatial point.</dd>
 <dt><strong><code>initial_velocity</code></strong> :&ensp;<code>callable</code>, optional</dt>
-<dd>Function specifying the initial velocity ∂ₜu₀(x) or ∂ₜu₀(x, y). If provided, a second-order
-PDE is solved.</dd>
+<dd>Function ∂ₜu₀(x) or ∂ₜu₀(x, y). If given, solves the second-order wave equation,
+otherwise solves the first-order evolution equation.</dd>
 <dt><strong><code>solver_params</code></strong> :&ensp;<code>dict</code>, optional</dt>
-<dd>Additional keyword arguments passed to the PDE solver.</dd>
-<dt><strong><code>component</code></strong> :&ensp;<code>{'real', 'imag', 'abs', 'angle'}</code></dt>
-<dd>Specifies which component of the solution to animate.</dd>
+<dd>Extra keyword arguments passed to <code><a title="PDESolver.PDESolver.setup" href="#PDESolver.PDESolver.setup">PDESolver.setup()</a></code>, for example:
+- <code>boundary_condition</code>: string (default “periodic”)
+- <code>n_frames</code>: int, number of frames in the returned animation
+- any other parameters accepted by <code><a title="PDESolver.PDESolver.setup" href="#PDESolver.PDESolver.setup">PDESolver.setup()</a></code>.</dd>
+<dt><strong><code>component</code></strong> :&ensp;<code>{'real', 'imag', 'abs', 'angle'}</code>, default <code>'real'</code></dt>
+<dd>Which component of the complex solution to animate.</dd>
 </dl>
 <h2 id="returns">Returns</h2>
 <dl>
 <dt><code>matplotlib.animation.FuncAnimation</code></dt>
-<dd>Animation object showing the evolution of the solution over time.</dd>
+<dd>An animation object showing the solution over time.</dd>
+</dl>
+<h2 id="raises">Raises</h2>
+<dl>
+<dt><code>ValueError</code></dt>
+<dd>If <code>initial_condition</code> is not provided.</dd>
+<dt><code>NotImplementedError</code></dt>
+<dd>If <code>self.dim</code> is not 1 or 2.</dd>
 </dl>
 <h2 id="notes">Notes</h2>
 <ul>
-<li>Solves the PDE:<ul>
-<li>First-order: ∂ₜu = -i ⋅ p(x, D) u</li>
-<li>Second-order: ∂²ₜu = -p(x, D)² u</li>
-</ul>
+<li>First-order evolution: ∂ₜu = p(x,D) u
 </li>
-<li>Supports 1D and 2D simulations depending on the presence of <code>y_grid</code>.</li>
-<li>The solution is animated using the specified component view.</li>
-<li>Useful for visualizing wave propagation and dispersive effects driven by pseudo-differential operators.</li>
+<li>Second-order (wave) equation: ∂²ₜu = p(x,D) u
+</li>
+<li>Builds a <code><a title="PDESolver.PDESolver" href="#PDESolver.PDESolver">PDESolver</a></code> from a symbolic Sympy equation, sets up a spectral grid,
+steps forward in time, and animates the selected component.</li>
 </ul></div>
 <details class="source">
 <summary>
@@ -16872,43 +16504,52 @@ PDE is solved.</dd>
                        initial_condition=None, initial_velocity=None,
                        solver_params=None, component=&#39;real&#39;):
     &#34;&#34;&#34;
-    Simulate and animate the time evolution of an initial condition under a pseudo-differential operator.
+    Simulate and animate the time evolution of a wave under this pseudo-differential operator.
 
-    This method solves the PDE governed by the action of a pseudo-differential operator `p(x, D)`,
-    either as a first-order or second-order time evolution, and generates an animation of the resulting
-    wave propagation. The order of the PDE depends on whether an initial velocity is provided.
+    This method discretizes and numerically integrates either a first-order or
+    second-order in time PDE driven by the operator defined by `self.expr`. It supports
+    both 1D (only `x_grid`) and 2D (`x_grid` + `y_grid`) spatial domains with periodic
+    boundary conditions.
 
     Parameters
     ----------
     x_grid : numpy.ndarray
-        Spatial grid in the x-direction.
+        1D array of spatial points along the x-axis.
     t_grid : numpy.ndarray
-        Temporal grid for the simulation.
+        1D array of time points at which the solution will be computed (and animated).
     y_grid : numpy.ndarray, optional
-        Spatial grid in the y-direction (used for 2D problems).
-    initial_condition : callable, optional
-        Function specifying the initial condition u₀(x) or u₀(x, y).
+        1D array of spatial points along the y-axis. If provided, runs a 2D simulation.
+    initial_condition : callable
+        Function u₀(x) or u₀(x, y) returning the initial field at each spatial point.
     initial_velocity : callable, optional
-        Function specifying the initial velocity ∂ₜu₀(x) or ∂ₜu₀(x, y). If provided, a second-order
-        PDE is solved.
+        Function ∂ₜu₀(x) or ∂ₜu₀(x, y). If given, solves the second-order wave equation,
+        otherwise solves the first-order evolution equation.
     solver_params : dict, optional
-        Additional keyword arguments passed to the PDE solver.
-    component : {&#39;real&#39;, &#39;imag&#39;, &#39;abs&#39;, &#39;angle&#39;}
-        Specifies which component of the solution to animate.
+        Extra keyword arguments passed to `PDESolver.setup()`, for example:
+        - `boundary_condition`: string (default “periodic”)
+        - `n_frames`: int, number of frames in the returned animation
+        - any other parameters accepted by `PDESolver.setup`.
+    component : {&#39;real&#39;, &#39;imag&#39;, &#39;abs&#39;, &#39;angle&#39;}, default &#39;real&#39;
+        Which component of the complex solution to animate.
 
     Returns
     -------
     matplotlib.animation.FuncAnimation
-        Animation object showing the evolution of the solution over time.
+        An animation object showing the solution over time.
+
+    Raises
+    ------
+    ValueError
+        If `initial_condition` is not provided.
+    NotImplementedError
+        If `self.dim` is not 1 or 2.
 
     Notes
     -----
-    - Solves the PDE:
-        - First-order: ∂ₜu = -i ⋅ p(x, D) u
-        - Second-order: ∂²ₜu = -p(x, D)² u
-    - Supports 1D and 2D simulations depending on the presence of `y_grid`.
-    - The solution is animated using the specified component view.
-    - Useful for visualizing wave propagation and dispersive effects driven by pseudo-differential operators.
+    - First-order evolution: ∂ₜu = p(x,D) u  
+    - Second-order (wave) equation: ∂²ₜu = p(x,D) u  
+    - Builds a `PDESolver` from a symbolic Sympy equation, sets up a spectral grid,
+      steps forward in time, and animates the selected component.
     &#34;&#34;&#34;
     if solver_params is None:
         solver_params = {}
@@ -17386,7 +17027,7 @@ which is particularly useful for analyzing characteristic sets.</p>
 <dd>
 <div class="desc"><p>Visualize the characteristic set of the pseudo-differential symbol, defined as the approximate zero set p(x, ξ) ≈ 0.</p>
 <p>In microlocal analysis, the characteristic set is the locus of points in phase space (x, ξ) where the symbol p(x, ξ) vanishes,
-playing a key role in understanding propagation of singularities and wavefronts.</p>
+playing a key role in understanding propagation of singularities.</p>
 <h2 id="parameters">Parameters</h2>
 <dl>
 <dt><strong><code>x_grid</code></strong> :&ensp;<code>ndarray</code></dt>
@@ -17422,7 +17063,7 @@ playing a key role in understanding propagation of singularities and wavefronts.
     Visualize the characteristic set of the pseudo-differential symbol, defined as the approximate zero set p(x, ξ) ≈ 0.
 
     In microlocal analysis, the characteristic set is the locus of points in phase space (x, ξ) where the symbol p(x, ξ) vanishes,
-    playing a key role in understanding propagation of singularities and wavefronts.
+    playing a key role in understanding propagation of singularities.
 
     Parameters
     ----------
@@ -17478,179 +17119,6 @@ playing a key role in understanding propagation of singularities and wavefronts.
         plt.show()
     else:
         raise NotImplementedError(&#34;Only 1D/2D characteristic sets supported.&#34;)</code></pre>
-</details>
-</dd>
-<dt id="PDESolver.PseudoDifferentialOperator.visualize_dynamic_wavefront"><code class="name flex">
-<span>def <span class="ident">visualize_dynamic_wavefront</span></span>(<span>self, x_grid, t_grid, y_grid=None, xi0=5.0, eta0=0.0)</span>
-</code></dt>
-<dd>
-<div class="desc"><p>Create an animation of a monochromatic wave evolving under the pseudo-differential operator.</p>
-<p>This method visualizes the time evolution of a wavefront governed by the symbol of the
-pseudo-differential operator. The wave is initialized as a monochromatic solution with
-fixed spatial frequencies and evolves according to the dispersion relation
-ω = p(x, ξ), where p is the symbol of the operator and (ξ, η) are spatial frequencies.</p>
-<h2 id="parameters">Parameters</h2>
-<dl>
-<dt><strong><code>x_grid</code></strong> :&ensp;<code>array_like</code></dt>
-<dd>1D array representing the spatial grid in the x-direction.</dd>
-<dt><strong><code>t_grid</code></strong> :&ensp;<code>array_like</code></dt>
-<dd>1D array of time points used to generate the animation frames.</dd>
-<dt><strong><code>y_grid</code></strong> :&ensp;<code>array_like</code>, optional</dt>
-<dd>1D array representing the spatial grid in the y-direction (required for 2D operators).</dd>
-<dt><strong><code>xi0</code></strong> :&ensp;<code>float</code>, optional</dt>
-<dd>Initial spatial frequency in the x-direction. Default is 5.0.</dd>
-<dt><strong><code>eta0</code></strong> :&ensp;<code>float</code>, optional</dt>
-<dd>Initial spatial frequency in the y-direction (used in 2D). Default is 0.0.</dd>
-</dl>
-<h2 id="returns">Returns</h2>
-<dl>
-<dt><code>matplotlib.animation.FuncAnimation</code></dt>
-<dd>Animation object showing the time evolution of the monochromatic wave.</dd>
-</dl>
-<h2 id="notes">Notes</h2>
-<ul>
-<li>In 1D, visualizes the wave u(x, t) = cos(ξ₀·x − ω·t).</li>
-<li>In 2D, visualizes u(x, y, t) = cos(ξ₀·x + η₀·y − ω·t).</li>
-<li>The frequency ω is computed as the symbol evaluated at the fixed frequency components.</li>
-<li>If the symbol depends on space, it is evaluated at the origin (x=0, y=0).</li>
-</ul>
-<h2 id="raises">Raises</h2>
-<dl>
-<dt><code>ValueError</code></dt>
-<dd>If <code>y_grid</code> is not provided while the operator is 2D.</dd>
-<dt><code>NotImplementedError</code></dt>
-<dd>If the spatial dimension of the operator is neither 1 nor 2.</dd>
-</dl></div>
-<details class="source">
-<summary>
-<span>Expand source code</span>
-</summary>
-<pre><code class="python">def visualize_dynamic_wavefront(self, x_grid, t_grid, y_grid=None, xi0=5.0, eta0=0.0):
-    &#34;&#34;&#34;
-    Create an animation of a monochromatic wave evolving under the pseudo-differential operator.
-
-    This method visualizes the time evolution of a wavefront governed by the symbol of the 
-    pseudo-differential operator. The wave is initialized as a monochromatic solution with 
-    fixed spatial frequencies and evolves according to the dispersion relation 
-    ω = p(x, ξ), where p is the symbol of the operator and (ξ, η) are spatial frequencies.
-
-    Parameters
-    ----------
-    x_grid : array_like
-        1D array representing the spatial grid in the x-direction.
-    t_grid : array_like
-        1D array of time points used to generate the animation frames.
-    y_grid : array_like, optional
-        1D array representing the spatial grid in the y-direction (required for 2D operators).
-    xi0 : float, optional
-        Initial spatial frequency in the x-direction. Default is 5.0.
-    eta0 : float, optional
-        Initial spatial frequency in the y-direction (used in 2D). Default is 0.0.
-
-    Returns
-    -------
-    matplotlib.animation.FuncAnimation
-        Animation object showing the time evolution of the monochromatic wave.
-
-    Notes
-    -----
-    - In 1D, visualizes the wave u(x, t) = cos(ξ₀·x − ω·t).
-    - In 2D, visualizes u(x, y, t) = cos(ξ₀·x + η₀·y − ω·t).
-    - The frequency ω is computed as the symbol evaluated at the fixed frequency components.
-    - If the symbol depends on space, it is evaluated at the origin (x=0, y=0).
-    
-    Raises
-    ------
-    ValueError
-        If `y_grid` is not provided while the operator is 2D.
-    NotImplementedError
-        If the spatial dimension of the operator is neither 1 nor 2.
-    &#34;&#34;&#34;
-
-    if self.dim == 1:
-        # Calculer omega a partir du symbole
-        from sympy import symbols, N
-        x = self.vars_x[0]
-        xi = symbols(&#39;xi&#39;, real=True)
-        try:
-            omega_symbolic = self.expr.subs({x: 0, xi: xi0})
-        except:
-            omega_symbolic = self.expr.subs(xi, xi0)
-            
-        omega_val = float(N(omega_symbolic.as_real_imag()[0]))
-
-        # Preparer les donnees pour l&#39;animation
-        X, T = np.meshgrid(x_grid, t_grid, indexing=&#39;ij&#39;)
-        
-        # Initialiser la figure et l&#39;axe
-        fig, ax = plt.subplots()
-        ax.set_xlim(x_grid.min(), x_grid.max())
-        ax.set_ylim(-1.1, 1.1)
-        ax.set_xlabel(&#39;x&#39;)
-        ax.set_ylabel(&#39;u(x, t)&#39;)
-        ax.set_title(f&#39;Dynamic 1D Wavefront u(x, t) = cos({xi0}*x - {omega_val:.2f}*t)&#39;)
-        ax.grid(True)
-        
-        line, = ax.plot([], [], lw=2)
-        
-        # Pre-calculer les temps
-        T_vals = t_grid
-        
-        def animate(frame):
-            t = T_vals[frame] if frame &lt; len(T_vals) else T_vals[-1]
-            U = np.cos(xi0 * x_grid - omega_val * t)
-            line.set_data(x_grid, U)
-            ax.set_title(f&#39;Dynamic 1D Wavefront u(x, t) = cos({xi0}*x - {omega_val:.2f}*t) at t={t:.2f}&#39;)
-            return line,
-
-        ani = animation.FuncAnimation(fig, animate, frames=len(T_vals), interval=50, blit=True, repeat=True)
-        plt.show()
-        return ani
-
-    elif self.dim == 2:
-        # Calculer omega a partir du symbole
-        from sympy import symbols, N
-        x, y = self.vars_x
-        xi, eta = symbols(&#39;xi eta&#39;, real=True)
-        try:
-            omega_symbolic = self.expr.subs({x: 0, y: 0, xi: xi0, eta: eta0})
-        except:
-            omega_symbolic = self.expr.subs({xi: xi0, eta: eta0})
-            
-        omega_val = float(N(omega_symbolic.as_real_imag()[0]))
-
-        if y_grid is None:
-            raise ValueError(&#34;y_grid must be provided for 2D visualization.&#34;)
-
-        # Creer les grilles
-        X, Y = np.meshgrid(x_grid, y_grid, indexing=&#39;ij&#39;)
-        
-        # Initialiser la figure
-        fig, ax = plt.subplots()
-        ax.set_xlabel(&#39;x&#39;)
-        ax.set_ylabel(&#39;y&#39;)
-        
-        # Premiere frame
-        t0 = t_grid[0] if len(t_grid) &gt; 0 else 0.0
-        U = np.cos(xi0 * X + eta0 * Y - omega_val * t0)
-        extent = [x_grid.min(), x_grid.max(), y_grid.min(), y_grid.max()]
-        im = ax.imshow(U, extent=extent, aspect=&#39;equal&#39;, origin=&#39;lower&#39;, cmap=&#39;seismic&#39;, vmin=-1, vmax=1)
-        ax.set_title(f&#39;Dynamic 2D Wavefront at t={t0:.2f}&#39;)
-        fig.colorbar(im, ax=ax, label=&#39;u(x, y, t)&#39;)
-        
-        # Pre-calculer les temps
-        T_vals = t_grid
-        
-        def animate(frame):
-            t = T_vals[frame] if frame &lt; len(T_vals) else T_vals[-1]
-            U = np.cos(xi0 * X + eta0 * Y - omega_val * t)
-            im.set_array(U)
-            ax.set_title(f&#39;Dynamic 2D Wavefront at t={t:.2f}&#39;)
-            return [im]
-
-        ani = animation.FuncAnimation(fig, animate, frames=len(T_vals), interval=50, blit=False, repeat=True)
-        plt.show()
-        return ani</code></pre>
 </details>
 </dd>
 <dt id="PDESolver.PseudoDifferentialOperator.visualize_fiber"><code class="name flex">
@@ -17766,7 +17234,7 @@ highlighting areas of significant operator influence or singularity.</p>
 <li>This method evaluates the symbol p(x, ξ) over a grid and plots its reciprocal to emphasize
 regions where the symbol is near zero.</li>
 <li>A small constant (1e-10) is added to the denominator to avoid division by zero.</li>
-<li>The resulting plot helps identify characteristic sets and wavefront set approximations.</li>
+<li>The resulting plot helps identify characteristic sets.</li>
 </ul></div>
 <details class="source">
 <summary>
@@ -17801,7 +17269,7 @@ regions where the symbol is near zero.</li>
     - This method evaluates the symbol p(x, ξ) over a grid and plots its reciprocal to emphasize 
       regions where the symbol is near zero.
     - A small constant (1e-10) is added to the denominator to avoid division by zero.
-    - The resulting plot helps identify characteristic sets and wavefront set approximations.
+    - The resulting plot helps identify characteristic sets.
     &#34;&#34;&#34;
     if self.dim != 1:
         raise NotImplementedError(&#34;Only 1D micro-support visualization implemented.&#34;)
@@ -17979,96 +17447,6 @@ but the visualization fixes ξ = ξ₀ and η = η₀.</dd>
         plt.show()</code></pre>
 </details>
 </dd>
-<dt id="PDESolver.PseudoDifferentialOperator.visualize_wavefront"><code class="name flex">
-<span>def <span class="ident">visualize_wavefront</span></span>(<span>self, x_grid, xi_grid, y_grid=None, eta_grid=None, xi0=0.0, eta0=0.0)</span>
-</code></dt>
-<dd>
-<div class="desc"><p>Visualize the wavefront set of the pseudo-differential operator's symbol by plotting |p(x, ξ)| or |p(x, y, ξ₀, η₀)|.</p>
-<p>The wavefront set captures the location and direction of singularities in the symbol p, which is crucial in
-microlocal analysis for understanding propagation of singularities and wave behavior.</p>
-<p>In 1D, this method displays |p(x, ξ)| over the phase space (x, ξ). In 2D, it fixes the frequency values (ξ₀, η₀)
-and visualizes |p(x, y, ξ₀, η₀)| over the spatial domain to highlight where the symbol interacts with the fixed frequency.</p>
-<h2 id="parameters">Parameters</h2>
-<dl>
-<dt><strong><code>x_grid</code></strong> :&ensp;<code>ndarray</code></dt>
-<dd>1D array of spatial coordinates (x) used for evaluation.</dd>
-<dt><strong><code>xi_grid</code></strong> :&ensp;<code>ndarray</code></dt>
-<dd>1D array of frequency coordinates (ξ) used for visualization in 1D or slicing in 2D.</dd>
-<dt><strong><code>y_grid</code></strong> :&ensp;<code>ndarray</code>, optional</dt>
-<dd>1D array of second spatial coordinate (y), used only in 2D.</dd>
-<dt><strong><code>eta_grid</code></strong> :&ensp;<code>ndarray</code>, optional</dt>
-<dd>1D array of second frequency coordinate (η), not directly used but kept for API consistency.</dd>
-<dt><strong><code>xi0</code></strong> :&ensp;<code>float</code>, default=<code>0.0</code></dt>
-<dd>Fixed value of ξ for slicing in 2D visualization.</dd>
-<dt><strong><code>eta0</code></strong> :&ensp;<code>float</code>, default=<code>0.0</code></dt>
-<dd>Fixed value of η for slicing in 2D visualization.</dd>
-</dl>
-<h2 id="notes">Notes</h2>
-<ul>
-<li>In 1D:
-Displays a 2D color map of |p(x, ξ)| over the phase space with axes (x, ξ).</li>
-<li>In 2D:
-Evaluates and plots |p(x, y, ξ₀, η₀)| at fixed frequencies (ξ₀, η₀) over the spatial grid (x, y).</li>
-<li>Uses <code>imshow</code> for fast and scalable visualization with automatic aspect ratio adjustment.</li>
-<li>A colormap ('viridis') is used to enhance contrast and readability of the magnitude variations.</li>
-</ul></div>
-<details class="source">
-<summary>
-<span>Expand source code</span>
-</summary>
-<pre><code class="python">def visualize_wavefront(self, x_grid, xi_grid, y_grid=None, eta_grid=None, xi0=0.0, eta0=0.0):
-    &#34;&#34;&#34;
-    Visualize the wavefront set of the pseudo-differential operator&#39;s symbol by plotting |p(x, ξ)| or |p(x, y, ξ₀, η₀)|.
-
-    The wavefront set captures the location and direction of singularities in the symbol p, which is crucial in 
-    microlocal analysis for understanding propagation of singularities and wave behavior.
-
-    In 1D, this method displays |p(x, ξ)| over the phase space (x, ξ). In 2D, it fixes the frequency values (ξ₀, η₀)
-    and visualizes |p(x, y, ξ₀, η₀)| over the spatial domain to highlight where the symbol interacts with the fixed frequency.
-
-    Parameters
-    ----------
-    x_grid : ndarray
-        1D array of spatial coordinates (x) used for evaluation.
-    xi_grid : ndarray
-        1D array of frequency coordinates (ξ) used for visualization in 1D or slicing in 2D.
-    y_grid : ndarray, optional
-        1D array of second spatial coordinate (y), used only in 2D.
-    eta_grid : ndarray, optional
-        1D array of second frequency coordinate (η), not directly used but kept for API consistency.
-    xi0 : float, default=0.0
-        Fixed value of ξ for slicing in 2D visualization.
-    eta0 : float, default=0.0
-        Fixed value of η for slicing in 2D visualization.
-
-    Notes
-    -----
-    - In 1D:
-        Displays a 2D color map of |p(x, ξ)| over the phase space with axes (x, ξ).
-    - In 2D:
-        Evaluates and plots |p(x, y, ξ₀, η₀)| at fixed frequencies (ξ₀, η₀) over the spatial grid (x, y).
-    - Uses `imshow` for fast and scalable visualization with automatic aspect ratio adjustment.
-    - A colormap (&#39;viridis&#39;) is used to enhance contrast and readability of the magnitude variations.
-    &#34;&#34;&#34;
-    if self.dim == 1:
-        X, XI = np.meshgrid(x_grid, xi_grid)
-        symbol_vals = self.p_func(X, XI)
-        plt.imshow(np.abs(symbol_vals), extent=[xi_grid.min(), xi_grid.max(), x_grid.min(), x_grid.max()],
-                   aspect=&#39;auto&#39;, origin=&#39;lower&#39;, cmap=&#39;viridis&#39;)
-    elif self.dim == 2:
-        X, Y = np.meshgrid(x_grid, y_grid)
-        XI = np.full_like(X, xi0)
-        ETA = np.full_like(Y, eta0)
-        symbol_vals = self.p_func(X, Y, XI, ETA)
-        plt.imshow(np.abs(symbol_vals), extent=[x_grid.min(), x_grid.max(), y_grid.min(), y_grid.max()],
-                   aspect=&#39;auto&#39;, origin=&#39;lower&#39;, cmap=&#39;viridis&#39;)
-    plt.colorbar(label=&#39;|Symbol|&#39;)
-    plt.xlabel(&#39;ξ/Position&#39;)
-    plt.ylabel(&#39;η/Position&#39;)
-    plt.title(&#39;Wavefront Set&#39;)
-    plt.show()</code></pre>
-</details>
-</dd>
 </dl>
 </dd>
 <dt id="PDESolver.psiOp"><code class="flex name class">
@@ -18204,12 +17582,10 @@ Usage: psiOp(symbol_expr, u)</p></div>
 <li><code><a title="PDESolver.PseudoDifferentialOperator.symplectic_flow" href="#PDESolver.PseudoDifferentialOperator.symplectic_flow">symplectic_flow</a></code></li>
 <li><code><a title="PDESolver.PseudoDifferentialOperator.visualize_characteristic_gradient" href="#PDESolver.PseudoDifferentialOperator.visualize_characteristic_gradient">visualize_characteristic_gradient</a></code></li>
 <li><code><a title="PDESolver.PseudoDifferentialOperator.visualize_characteristic_set" href="#PDESolver.PseudoDifferentialOperator.visualize_characteristic_set">visualize_characteristic_set</a></code></li>
-<li><code><a title="PDESolver.PseudoDifferentialOperator.visualize_dynamic_wavefront" href="#PDESolver.PseudoDifferentialOperator.visualize_dynamic_wavefront">visualize_dynamic_wavefront</a></code></li>
 <li><code><a title="PDESolver.PseudoDifferentialOperator.visualize_fiber" href="#PDESolver.PseudoDifferentialOperator.visualize_fiber">visualize_fiber</a></code></li>
 <li><code><a title="PDESolver.PseudoDifferentialOperator.visualize_micro_support" href="#PDESolver.PseudoDifferentialOperator.visualize_micro_support">visualize_micro_support</a></code></li>
 <li><code><a title="PDESolver.PseudoDifferentialOperator.visualize_phase" href="#PDESolver.PseudoDifferentialOperator.visualize_phase">visualize_phase</a></code></li>
 <li><code><a title="PDESolver.PseudoDifferentialOperator.visualize_symbol_amplitude" href="#PDESolver.PseudoDifferentialOperator.visualize_symbol_amplitude">visualize_symbol_amplitude</a></code></li>
-<li><code><a title="PDESolver.PseudoDifferentialOperator.visualize_wavefront" href="#PDESolver.PseudoDifferentialOperator.visualize_wavefront">visualize_wavefront</a></code></li>
 </ul>
 </li>
 <li>

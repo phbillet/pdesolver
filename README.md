@@ -46,7 +46,6 @@ It supports:
   - Leap-Frog (energy-conserving)
 
 ### 🧭 Microlocal & Spectral Analysis
-- 📈 Wavefront Set tracking
 - 🔬 Symbol amplitude & phase plots
 - 🎯 Characteristic & micro-support sets
 - 🌀 Hamiltonian & symplectic flow visualization
