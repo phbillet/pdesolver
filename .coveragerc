@@ -1,0 +1,5 @@
+[run]
+source = PDESolver
+
+[report]
+fail_under = 0 
