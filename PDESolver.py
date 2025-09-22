@@ -233,6 +233,7 @@ import os
     
 plt.rcParams['text.usetex'] = False
 FFT_WORKERS = max(1, os.cpu_count() // 2)
+NUM_COLS = 150
 
 class Op(Function):
     """Custom symbolic wrapper for pseudo-differential operators in Fourier space.
@@ -351,7 +352,7 @@ class PseudoDifferentialOperator:
             raise NotImplementedError("Only 1D and 2D supported")
 
         print("\nsymbol = ")
-        pprint(expr, num_columns=150)
+        pprint(self.symbol, num_columns=NUM_COLS)
         
     def evaluate(self, X, Y, KX, KY, cache=True):
         """
@@ -425,7 +426,7 @@ class PseudoDifferentialOperator:
         - Useful for microlocal analysis and constructing parametrices.
         """
 
-        p = self.expr
+        p = self.symbol
         if self.dim == 1:
             xi = symbols('xi', real=True, positive=True)
             return simplify(series(p, xi, oo, n=order).removeO())
@@ -458,7 +459,7 @@ class PseudoDifferentialOperator:
         if self.dim == 1:
             xi = symbols('xi', real=True, positive=True)
             l = symbols('l', real=True, positive=True)
-            p = self.expr
+            p = self.symbol
             p_scaled = p.subs(xi, l * xi)
             ratio = simplify(p_scaled / p)
             if ratio.has(xi):
@@ -472,7 +473,7 @@ class PseudoDifferentialOperator:
         elif self.dim == 2:
             xi, eta = symbols('xi eta', real=True, positive=True)
             l = symbols('l', real=True, positive=True)
-            p = self.expr
+            p = self.symbol
             p_scaled = p.subs({xi: l * xi, eta: l * eta})
             ratio = simplify(p_scaled / p)
             # If ratio == l**m with no (xi, eta) left, it's homogeneous
@@ -583,7 +584,7 @@ class PseudoDifferentialOperator:
     
             try:
                 print("1D symbol_order - method 1")
-                expr = preprocess_sqrt(self.expr, xi)
+                expr = preprocess_sqrt(self.symbol, xi)
                 s = series(expr, xi, oo, n=max_order).removeO()
                 lead = simplify(powdenest(s.as_leading_term(xi), force=True))
                 power = lead.as_powers_dict().get(xi, None)
@@ -600,7 +601,7 @@ class PseudoDifferentialOperator:
             try:
                 print("1D symbol_order - method 2")
                 z = symbols('z', real=True, positive=True)
-                expr_z = preprocess_sqrt(self.expr.subs(xi, 1/z), 1/z)
+                expr_z = preprocess_sqrt(self.symbol.subs(xi, 1/z), 1/z)
                 s = series(expr_z, z, 0, n=max_order).removeO()
                 lead = simplify(powdenest(s.as_leading_term(z), force=True))
                 power = lead.as_powers_dict().get(z, None)
@@ -622,7 +623,7 @@ class PseudoDifferentialOperator:
     
             try:
                 print("2D symbol_order - method 1")
-                p_rho = self.expr.subs({xi: rho * cos(theta), eta: rho * sin(theta)})
+                p_rho = self.symbol.subs({xi: rho * cos(theta), eta: rho * sin(theta)})
                 p_rho = preprocess_power(preprocess_sqrt(p_rho, rho), rho)
                 s = series(simplify(p_rho), rho, oo, n=max_order).removeO()
                 lead = radsimp(simplify(powdenest(s.as_leading_term(rho), force=True)))
@@ -641,7 +642,7 @@ class PseudoDifferentialOperator:
                 print("2D symbol_order - method 2")
                 z = symbols('z', real=True, positive=True)
                 xi_eta = {xi: (1/z) * cos(theta), eta: (1/z) * sin(theta)}
-                p_rho = preprocess_sqrt(self.expr.subs(xi_eta), 1/z)
+                p_rho = preprocess_sqrt(self.symbol.subs(xi_eta), 1/z)
                 s = series(simplify(p_rho), z, 0, n=max_order).removeO()
                 lead = radsimp(simplify(powdenest(s.as_leading_term(z), force=True)))
                 power = lead.as_powers_dict().get(z, None)
@@ -692,7 +693,7 @@ class PseudoDifferentialOperator:
         - Robust to failures: catches exceptions and issues warnings instead of raising errors.
         - Final expression is simplified using `powdenest` and `expand` for improved readability.
         """
-        p = self.expr
+        p = self.symbol
     
         if self.dim == 1:
             xi = symbols('xi', real=True, positive=True)
@@ -784,7 +785,7 @@ class PseudoDifferentialOperator:
         """
 
         assert self.dim == other.dim, "Operator dimensions must match"
-        p, q = self.expr, other.expr
+        p, q = self.symbol, other.symbol
     
         if self.dim == 1:
             x = self.vars_x[0]
@@ -835,7 +836,7 @@ class PseudoDifferentialOperator:
         - Each term in the expansion corresponds to higher-order corrections involving commutators 
           between the operator P and the current approximation of R.
         """
-        p = self.expr
+        p = self.symbol
         if self.dim == 1:
             x = self.vars_x[0]
             xi = symbols('xi', real=True)
@@ -897,7 +898,7 @@ class PseudoDifferentialOperator:
           previously computed terms of the inverse.
         - Coefficients include powers of 1j (i) and factorial normalization for derivative terms.
         """
-        p = self.expr
+        p = self.symbol
         if self.dim == 1:
             x = self.vars_x[0]
             xi = symbols('xi', real=True)
@@ -946,7 +947,7 @@ class PseudoDifferentialOperator:
         - In 2D, the expansion is radial in |ξ| = sqrt(ξ² + η²).
         - This method ensures symbolic simplifications for readability and efficiency.
         """
-        p = self.expr
+        p = self.symbol
         if self.dim == 1:
             x, = self.vars_x
             xi = symbols('xi', real=True)
@@ -1088,7 +1089,7 @@ class PseudoDifferentialOperator:
         - Symbolic simplification is used to verify equality, ensuring robustness against superficial 
           expression differences.
         """
-        p = self.expr
+        p = self.symbol
         p_star = self.formal_adjoint()
         return simplify(p - p_star).equals(0)
 
@@ -1352,7 +1353,7 @@ class PseudoDifferentialOperator:
             symbol_vals = self.p_func(x0, y0, xi_grid2, eta_grid2)
             grad_xi = np.gradient(symbol_vals, axis=0)
             grad_eta = np.gradient(symbol_vals, axis=1)
-            grad_norm = np.sqrt(grad_xi**2 + grad_eta**2)
+            grad_norm = np.sqrt(np.abs(grad_xi)**2 + np.abs(grad_eta)**2)
             plt.pcolormesh(xi_grid, eta_grid, grad_norm, cmap='inferno', shading='auto')
             plt.colorbar(label='|∇p|')
             plt.title(f'Gradient Norm at x={x0}, y={y0}')
@@ -1423,17 +1424,17 @@ class PseudoDifferentialOperator:
             xi = symbols('xi', real=True)
             u = u_sym(t, x)
             if is_second_order:
-                eq = Eq(diff(u, t, 2), psiOp(self.expr, u))
+                eq = Eq(diff(u, t, 2), psiOp(self.symbol, u))
             else:
-                eq = Eq(diff(u, t), psiOp(self.expr, u))
+                eq = Eq(diff(u, t), psiOp(self.symbol, u))
         elif self.dim == 2:
             x, y = self.vars_x
             xi, eta = symbols('xi eta', real=True)
             u = u_sym(t, x, y)
             if is_second_order:
-                eq = Eq(diff(u, t, 2), psiOp(self.expr, u))
+                eq = Eq(diff(u, t, 2), psiOp(self.symbol, u))
             else:
-                eq = Eq(diff(u, t), psiOp(self.expr, u))
+                eq = Eq(diff(u, t), psiOp(self.symbol, u))
         else:
             raise NotImplementedError("Only 1D and 2D are supported.")
     
@@ -1732,7 +1733,7 @@ class PseudoDifferentialOperator:
 
         x, = self.vars_x
         xi = symbols('xi', real=True)
-        dp_dxi = diff(self.expr, xi)
+        dp_dxi = diff(self.symbol, xi)
         grad_func = lambdify((x, xi), dp_dxi, 'numpy')
 
         x_vals = np.linspace(*xlim, density)
@@ -1983,14 +1984,14 @@ class PseudoDifferentialOperator:
         - In 2D mode, additional sliders control the second frequency component (η₀) and second spatial coordinate (y₀).
         - Visualization updates dynamically as parameters are adjusted via sliders or dropdown menus.
         - Supported visualization modes:
-            'Group Velocity Field'       : ∇_ξ p(x,ξ) or ∇_{ξ,η} p(x,y,ξ,η)
-            'Micro-Support (1/|p|)'      : Reciprocal of symbol magnitude
-            'Symplectic Vector Field'    : (∇_ξ p, -∇_x p) or similar in 2D
             'Symbol Amplitude'           : |p(x,ξ)| or |p(x,y,ξ,η)|
             'Symbol Phase'               : arg(p(x,ξ)) or similar in 2D
+            'Micro-Support (1/|p|)'      : Reciprocal of symbol magnitude
             'Cotangent Fiber'            : Structure of symbol over frequency space at fixed x
             'Characteristic Set'         : Zero set approximation {p ≈ 0}
             'Characteristic Gradient'    : |∇p(x, ξ)| or |∇p(x₀, y₀, ξ, η)|
+            'Group Velocity Field'       : ∇_ξ p(x,ξ) or ∇_{ξ,η} p(x,y,ξ,η)
+            'Symplectic Vector Field'    : (∇_ξ p, -∇_x p) or similar in 2D
             'Hamiltonian Flow'           : Trajectories generated by the Hamiltonian vector field
     
         Raises
@@ -2008,17 +2009,17 @@ class PseudoDifferentialOperator:
     
         mode_selector = Dropdown(
             options=[
-                'Group Velocity Field',
-                'Micro-Support (1/|p|)',
-                'Symplectic Vector Field',
                 'Symbol Amplitude',
                 'Symbol Phase',
+                'Micro-Support (1/|p|)',
                 'Cotangent Fiber',
                 'Characteristic Set',
                 'Characteristic Gradient',
+                'Group Velocity Field',
+                'Symplectic Vector Field',
                 'Hamiltonian Flow',
             ],
-            value='Group Velocity Field',
+            value='Symbol Amplitude',
             description='Mode:'
         )
     
@@ -2238,7 +2239,7 @@ class PDESolver:
         print("\n*********************************")
         print("* Partial differential equation *")
         print("*********************************\n")
-        pprint(equation)
+        pprint(equation, num_columns=NUM_COLS)
         
         # Extract symbols and function from the equation
         functions = equation.atoms(Function)
@@ -2578,7 +2579,7 @@ class PDESolver:
         # --- Step 3: dispersion relation ---
         equation = simplify(lhs / plane_wave)
         print("\nCharacteristic equation before symbol treatment:")
-        pprint(equation)
+        pprint(equation, num_columns=NUM_COLS)
 
         print("\n--- Symbolic symbol analysis ---")
         symb_omega = 0
@@ -2597,7 +2598,7 @@ class PDESolver:
         equation = equation + symb_omega + symb_k         
 
         print("\nRaw characteristic equation:")
-        pprint(equation)
+        pprint(equation, num_columns=NUM_COLS)
 
         # Temporal derivative order detection
         try:
@@ -2626,7 +2627,7 @@ class PDESolver:
             if not dispersion:
                 raise ValueError("No solution found for omega")
             print("\n--- Solutions found ---")
-            pprint(dispersion)
+            pprint(dispersion, num_columns=NUM_COLS)
         
             if self.temporal_order == 2:
                 omega_expr = simplify(sqrt(dispersion[0]**2))
@@ -2640,7 +2641,7 @@ class PDESolver:
             self.L = lambdify(self.k_symbols, self.L_symbolic, "numpy")
   
             print("\n--- Final linear operator ---")
-            pprint(self.L_symbolic)   
+            pprint(self.L_symbolic, num_columns=NUM_COLS)   
 
     def linear_rhs(self, u, is_v=False):
         """
@@ -3795,7 +3796,7 @@ class PDESolver:
     
         R_symbol = psi_total.right_inverse_asymptotic(order=order)
         print("Right inverse asymptotic symbol:")
-        pprint(R_symbol, num_columns=150)
+        pprint(R_symbol, num_columns=NUM_COLS)
 
         if self.dim == 1:
             if R_symbol.has(x):
