@@ -36,6 +36,7 @@ jobs:
 
       - name: Run notebook tests with coverage
         run: |
+          export PYTHONPATH=$PYTHONPATH:.
           pytest --nbmake ./*.ipynb --cov=PDESolver --cov-report=xml
 
       - name: Upload coverage to Codecov
