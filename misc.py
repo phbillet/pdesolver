@@ -123,7 +123,6 @@ def make_symbol(g=None, b=None, V=None):
     symbol_str = " + ".join(terms)
     return sympify(symbol_str)
 
-
 operator_symbols = {
     "identity": {
         "physical": "u(x)",

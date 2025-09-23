@@ -2,9 +2,11 @@
 source = .
 include = PDESolver.py, misc.py
 parallel = True
+debug = trace
 
 [report]
 fail_under = 0
+show_missing = True
 
 [xml]
 output = coverage.xml
