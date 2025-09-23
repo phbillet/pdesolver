@@ -37,7 +37,7 @@ jobs:
       - name: Run notebook tests with coverage
         run: |
           export PYTHONPATH=$PWD:$PYTHONPATH
-          coverage run --source=PDESolver,misc --parallel-mode -m pytest --nbmake ./*.ipynb
+          coverage run --source=. --parallel-mode -m pytest --nbmake ./*.ipynb
           coverage combine
           coverage report --show-missing
           coverage xml
