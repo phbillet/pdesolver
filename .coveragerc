@@ -1,5 +1,10 @@
 [run]
-source = PDESolver
+source = .
+include = PDESolver.py, misc.py
+parallel = True
 
 [report]
-fail_under = 0 
+fail_under = 0
+
+[xml]
+output = coverage.xml

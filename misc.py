@@ -41,7 +41,6 @@ def ramp_function(x, y, point1, point2, direction='increasing'):
     
     return ramp
 
-
 def sigmoid_ramp(x, y, point1, point2, width=1.0, direction='increasing'):
     x1, y1 = point1
     x2, y2 = point2
