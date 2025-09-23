@@ -1,7 +1,6 @@
 # 🧮 PDESolver: A Symbolic & Spectral Python Framework for PDEs
 
 ![Test Notebooks](https://github.com/phbillet/pdesolver/actions/workflows/test-notebooks.yml/badge.svg)
-[![codecov](https://codecov.io/gh/phbillet/pdesolver/branch/master/graph/badge.svg)](https://codecov.io/gh/phbillet/pdesolver)
 
 ---
 
