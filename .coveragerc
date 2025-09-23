@@ -1,8 +1,5 @@
 [run]
-source = .
-include = PDESolver.py, misc.py
 parallel = True
-debug = trace
 
 [report]
 fail_under = 0
