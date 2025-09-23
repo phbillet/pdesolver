@@ -32,12 +32,14 @@ jobs:
       - name: Install dependencies
         run: |
           pip install -r requirements.txt
-          pip install pytest pytest-cov nbmake
+          pip install pytest coverage nbmake
 
       - name: Run notebook tests with coverage
         run: |
           export PYTHONPATH=$PYTHONPATH:.
-          pytest --nbmake ./*.ipynb --cov=PDESolver --cov-report=xml
+          coverage run --source=PDESolver --parallel-mode -m pytest --nbmake ./*.ipynb
+          coverage combine
+          coverage xml
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v4
@@ -45,4 +47,3 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: ./coverage.xml
           fail_ci_if_error: true
-
