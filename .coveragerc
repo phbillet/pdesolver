@@ -2,6 +2,7 @@
 parallel = True
 concurrency = multiprocessing
 sigterm = True
+source = .
 
 [report]
 fail_under = 0
