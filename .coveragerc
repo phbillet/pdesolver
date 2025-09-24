@@ -1,5 +1,7 @@
 [run]
 parallel = True
+concurrency = multiprocessing
+sigterm = True
 
 [report]
 fail_under = 0

@@ -308,4 +308,3 @@ convolution_kernels = {
         "equation": "Lorentzian (Cauchy) convolution kernel",
     },
 }
-
