@@ -1,4 +1,8 @@
 import numpy as np
+import matplotlib.pyplot as plt
+from PIL import Image
+import librosa, librosa.display
+import soundfile as sf
 
 # Miscellaneous functions
 
@@ -40,6 +44,7 @@ def ramp_function(x, y, point1, point2, direction='increasing'):
         raise ValueError("direction must be 'increasing' or 'decreasing'")
     
     return ramp
+
 
 def sigmoid_ramp(x, y, point1, point2, width=1.0, direction='increasing'):
     x1, y1 = point1
@@ -122,6 +127,249 @@ def make_symbol(g=None, b=None, V=None):
 
     symbol_str = " + ".join(terms)
     return sympify(symbol_str)
+
+# Sonification
+def image_to_sound(
+    image_path,
+    output_wav="son_from_image.wav",
+    sr=22050,
+    hop_length=256,
+    n_iter=64,
+    scale_log_freq=True,
+    use_hsv=True,
+    gain=5.0,
+    show_plot=True
+):
+    """
+    Convert an image into stereo sound by interpreting it as a spectrogram.
+
+    The input image is treated as a time–frequency representation:
+    - The vertical axis corresponds to frequency bins.
+    - The horizontal axis corresponds to time frames.
+    - The image is split into two halves along the horizontal axis:
+      the left half is converted into the LEFT audio channel,
+      the right half into the RIGHT channel.
+
+    Parameters
+    ----------
+    image_path : str
+        Path to the input image file. Can be grayscale or RGB.
+        If RGB and `use_hsv=True`, the HSV color space is used for mapping.
+    output_wav : str, optional
+        Filename of the output WAV file (default: "son_from_image.wav").
+    sr : int, optional
+        Target audio sampling rate in Hz (default: 22050).
+        Lower values produce lower-pitched sounds.
+    hop_length : int, optional
+        Number of samples between successive STFT frames (default: 256).
+        Smaller values produce a longer audio signal.
+    n_iter : int, optional
+        Number of Griffin–Lim iterations for phase reconstruction (default: 64).
+    scale_log_freq : bool, optional
+        If True, the frequency axis of the image is remapped to a logarithmic scale
+        before reconstruction (default: True).
+    use_hsv : bool, optional
+        If True and the image is RGB, the HSV color model is used:
+        - Hue → frequency mapping,
+        - Saturation → timbre,
+        - Value → amplitude.
+        Otherwise, the grayscale intensity is used (default: True).
+    gain : float, optional
+        Global amplification factor for the spectrogram intensity (default: 5.0).
+    show_plot : bool, optional
+        If True, displays:
+        - The original image (as interpreted spectrogram),
+        - The reconstructed spectrograms of LEFT and RIGHT channels (default: True).
+
+    Returns
+    -------
+    y_stereo : np.ndarray, shape (n_samples, 2)
+        Stereo audio signal: left and right channels as columns.
+    sr : int
+        Sampling rate of the generated audio.
+
+    Notes
+    -----
+    - The function always outputs a stereo WAV file, even for grayscale images.
+    - The stereo split is based on the horizontal axis of the image:
+      left side → left ear, right side → right ear.
+    - Griffin–Lim is an iterative algorithm, so reconstruction is approximate.
+    """
+    from PIL import Image
+
+    # ---------------------------
+    # 1. Load the image
+    # ---------------------------
+    img = Image.open(image_path)
+    if use_hsv and img.mode == "RGB":
+        img_hsv = img.convert("HSV")
+        H, S, V = [np.array(ch, dtype=np.float32) for ch in img_hsv.split()]
+        H /= 255.0
+        S /= 255.0
+        V /= 255.0
+        Z = V * (0.5 + 0.5 * S)  # intensity
+    else:
+        img_gray = img.convert("L")
+        Z = np.array(img_gray, dtype=np.float32)
+        Z /= Z.max()
+
+    n_freqs, n_frames = Z.shape
+    print(f"Image interpreted as: {n_freqs} frequencies × {n_frames} frames")
+
+    if show_plot:
+        plt.figure(figsize=(8, 4))
+        plt.imshow(Z, aspect='auto', origin='lower', cmap='inferno')
+        plt.title("Original image (interpreted as spectrogram)")
+        plt.xlabel("Frames (x)")
+        plt.ylabel("Frequency bins (y)")
+        plt.colorbar()
+        plt.show()
+
+    # ---------------------------
+    # 2. Amplification
+    # ---------------------------
+    S = Z * gain
+
+    # ---------------------------
+    # 3. Option log frequency
+    # ---------------------------
+    if scale_log_freq:
+        n_bins = n_freqs
+        log_y = np.geomspace(1, n_freqs, n_bins).astype(int) - 1
+        S = S[log_y, :]
+
+    # ---------------------------
+    # 4. Split into left / right halves
+    # ---------------------------
+    mid = n_frames // 2
+    S_left, S_right = S[:, :mid], S[:, mid:]
+
+    def reconstruct(S_part):
+        n_fft = 2 * (S_part.shape[0] - 1)
+        n_freqs_target = 1 + n_fft // 2
+        if S_part.shape[0] != n_freqs_target:
+            S_resized = np.zeros((n_freqs_target, S_part.shape[1]), dtype=np.float32)
+            for t in range(S_part.shape[1]):
+                S_resized[:, t] = np.interp(
+                    np.linspace(0, S_part.shape[0] - 1, n_freqs_target),
+                    np.arange(S_part.shape[0]),
+                    S_part[:, t]
+                )
+        else:
+            S_resized = S_part
+        y = librosa.griffinlim(S_resized, hop_length=hop_length, n_fft=n_fft,
+                               win_length=n_fft, n_iter=n_iter)
+        return y, n_fft
+
+    y_left, n_fft = reconstruct(S_left)
+    y_right, _ = reconstruct(S_right)
+
+    # Align lengths
+    L = min(len(y_left), len(y_right))
+    y_left, y_right = y_left[:L], y_right[:L]
+
+    # Stereo assembly
+    y_stereo = np.stack([y_left, y_right], axis=-1)
+
+    # ---------------------------
+    # 5. Visualization: BOTH channels
+    # ---------------------------
+    if show_plot:
+        fig, axs = plt.subplots(1, 2, figsize=(14, 4), sharey=True)
+
+        img_left = librosa.amplitude_to_db(
+            np.abs(librosa.stft(y_left, n_fft=n_fft, hop_length=hop_length)), ref=np.max
+        )
+        img_right = librosa.amplitude_to_db(
+            np.abs(librosa.stft(y_right, n_fft=n_fft, hop_length=hop_length)), ref=np.max
+        )
+
+        librosa.display.specshow(
+            img_left, sr=sr, hop_length=hop_length, x_axis="time", y_axis="log", ax=axs[0]
+        )
+        axs[0].set_title("Spectrogram LEFT channel")
+        fig.colorbar(axs[0].collections[0], ax=axs[0], format="%+2.0f dB")
+
+        librosa.display.specshow(
+            img_right, sr=sr, hop_length=hop_length, x_axis="time", y_axis="log", ax=axs[1]
+        )
+        axs[1].set_title("Spectrogram RIGHT channel")
+        fig.colorbar(axs[1].collections[0], ax=axs[1], format="%+2.0f dB")
+
+        plt.tight_layout()
+        plt.show()
+
+    # ---------------------------
+    # 6. Save audio
+    # ---------------------------
+    sf.write(output_wav, y_stereo, sr)
+    print(f"✅ Stereo audio saved: {output_wav} ({L/sr:.2f} seconds)")
+    return y_stereo, sr
+
+import cv2
+import numpy as np
+
+def video_to_sound(video_path, output_wav="video_son.wav",
+                   frame_step=10,   # 1 frame sur 10
+                   sr=22050, hop_length=256,
+                   scale_log_freq=True, use_hsv=True, gain=5.0):
+    """
+    Sonorise une vidéo en générant un son pour chaque image sous-échantillonnée,
+    puis concatène tous les sons.
+    
+    Paramètres
+    ----------
+    video_path : str
+        Chemin de la vidéo.
+    output_wav : str
+        Nom du fichier WAV de sortie.
+    frame_step : int
+        Intervalle d'images (1 = toutes les images, 10 = 1 sur 10).
+    Autres paramètres : passés à image_to_sound().
+    """
+    cap = cv2.VideoCapture(video_path)
+    if not cap.isOpened():
+        raise IOError(f"Impossible d'ouvrir {video_path}")
+
+    all_audio = []
+
+    frame_idx = 0
+    while True:
+        ret, frame = cap.read()
+        if not ret:
+            break
+
+        if frame_idx % frame_step == 0:
+            # Sauvegarde temporaire image
+            tmp_path = "frame_tmp.png"
+            cv2.imwrite(tmp_path, frame)
+
+            # Appelle la fonction image_to_sound
+            y, _ = image_to_sound(tmp_path,
+                                  output_wav=None, # pas de fichier individuel
+                                  sr=sr,
+                                  hop_length=hop_length,
+                                  scale_log_freq=scale_log_freq,
+                                  use_hsv=use_hsv,
+                                  gain=gain,
+                                  show_plot=False)
+            all_audio.append(y)
+
+        frame_idx += 1
+
+    cap.release()
+
+    # Concaténer tous les fragments
+    if all_audio:
+        y_full = np.concatenate(all_audio)
+        sf.write(output_wav, y_full, sr)
+        print(f"✅ Audio vidéo sauvegardé : {output_wav} ({len(y_full)/sr:.2f} s)")
+        return y_full, sr
+    else:
+        print("⚠️ Aucune frame traitée.")
+        return None, sr
+
+
 
 operator_symbols = {
     "identity": {
@@ -308,4 +556,7 @@ convolution_kernels = {
         "equation": "Lorentzian (Cauchy) convolution kernel",
     },
 }
+
+
+    
 

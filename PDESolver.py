@@ -219,14 +219,16 @@ from sympy import (
 from sympy.core.function import AppliedUndef
 from scipy.special import legendre, eval_hermite, airy, eval_genlaguerre
 from matplotlib import cm
-from matplotlib.animation import FuncAnimation
+from matplotlib.animation import FuncAnimation, FFMpegWriter
 import matplotlib.animation as animation
 from matplotlib import rc
 from functools import partial
+from PIL import Image
+import librosa, librosa.display
+import soundfile as sf
 from misc import * 
-from IPython.display import display, clear_output, HTML
+from IPython.display import display, clear_output, HTML, Video
 from ipywidgets import interact, FloatSlider, Dropdown, widgets
-from IPython.display import display, clear_output
 from itertools import product
 import os
 
@@ -4892,43 +4894,54 @@ class PDESolver:
         else:
             raise ValueError("Only 1D and 2D display are supported.")
 
-    
-    def animate(self, component='abs', overlay='contour'):
+    def animate(self, component='abs', overlay='contour', mode='surface'):
         """
         Create an animated plot of the solution evolution over time.
-
-        This method generates a dynamic visualization of the solution array `self.frames`, 
-        animating either the real part, imaginary part, absolute value, or complex angle 
-        of the field. It supports both 1D line plots and 2D surface plots with optional 
-        contour overlays.
-
+    
+        This method generates a dynamic visualization of the stored solution frames
+        `self.frames`. It supports:
+          - 1D line animation (unchanged),
+          - 2D surface animation (original behavior, 'surface'),
+          - 2D image animation using imshow (new, 'imshow') which is faster and
+            often clearer for large grids.
+    
         Parameters
         ----------
-        component : str in {'real', 'imag', 'abs', 'angle'}
-            The component of the solution to visualize:
-            
-              - 'real' : Real part Re(u)
-              - 'imag' : Imaginary part Im(u)
-              - 'abs' : Absolute value |u|
-              - 'angle' : Complex argument arg(u)
-
-        overlay : str in {'contour', 'front'}, optional
-            Type of overlay for 2D animations:
-            
-              - 'contour' : Adds contour lines beneath the surface at each frame.
-              - 'front' : Used for tracking wavefronts.
-
+        component : str, optional, one of {'real', 'imag', 'abs', 'angle'}
+            Which component of the complex field to visualize:
+              - 'real'  : Re(u)
+              - 'imag'  : Im(u)
+              - 'abs'   : |u|
+              - 'angle' : arg(u)
+            Default is 'abs'.
+    
+        overlay : str or None, optional, one of {'contour', 'front', None}
+            For 2D modes only. If None, no overlay is drawn.
+              - 'contour' : draw contour lines on top (or beneath for 3D surface)
+              - 'front'   : detect and mark wavefronts using gradient maxima
+            Default is 'contour'.
+    
+        mode : str, optional, one of {'surface', 'imshow'}
+            2D rendering mode. 'surface' keeps the original 3D surface plot.
+            'imshow' draws a 2D raster (faster, often more readable).
+            Default is 'surface' for backward compatibility.
+    
         Returns
         -------
         FuncAnimation
-            A Matplotlib `FuncAnimation` object that can be displayed or saved as a video.
-
+            A Matplotlib `FuncAnimation` instance (you can display it in a notebook
+            or save it to file).
+    
         Notes
         -----
-        - Uses linear interpolation to map simulation frames to target animation frames.
-        - In 2D, the z-axis dynamically rescales based on current data range.
-        - For 'angle' component, color scaling is fixed between -π and π for consistency.
-        - The animation interval is fixed at 50 ms per frame for smooth playback.
+        - The method uses the same time-mapping logic as before (linear sampling of
+          stored frames to animation frames).
+        - For 'angle' the color scale is fixed between -π and π.
+        - For other components, color scaling is by default dynamically adapted per
+          frame in 'imshow' mode (this avoids extreme clipping if amplitudes vary).
+        - Overlays are updated cleanly: previous contour/scatter artists are removed
+          before drawing the next frame to avoid memory/visual accumulation.
+        - Animation interval is 50 ms per frame (unchanged).
         """
         def get_component(u):
             if component == 'real':
@@ -4940,33 +4953,36 @@ class PDESolver:
             elif component == 'angle':
                 return np.angle(u)
             else:
-                raise ValueError("Invalid component")
-
+                raise ValueError("Invalid component: choose 'real','imag','abs' or 'angle'")
+    
         print("\n*********************")
         print("* Solution plotting *")
         print("*********************\n")
-        
+    
         # === Calculate time vector of stored frames ===
         save_interval = max(1, self.Nt // self.n_frames)
         frame_times = np.arange(0, self.Lt + self.dt, save_interval * self.dt)
-        
+    
         # === Target times for animation ===
         target_times = np.linspace(0, self.Lt, self.n_frames // 2)
-        
+    
         # Map target times to nearest frame indices
         frame_indices = [np.argmin(np.abs(frame_times - t)) for t in target_times]
     
+        # -------------------------
+        # 1D case (unchanged logic)
+        # -------------------------
         if self.dim == 1:
             fig, ax = plt.subplots()
-            line, = ax.plot(self.X, get_component(self.frames[0]))
-            ax.set_ylim(np.min(self.frames[0]), np.max(self.frames[0]))
+            initial = get_component(self.frames[0])
+            line, = ax.plot(self.X, np.real(initial) if np.iscomplexobj(initial) else initial)
+            ax.set_ylim(np.min(initial), np.max(initial))
             ax.set_xlabel('x')
             ax.set_ylabel(f'{component} of u')
             ax.set_title('Initial condition')
             plt.tight_layout()
-            plt.show()
     
-            def update(frame_number):
+            def update_1d(frame_number):
                 frame = frame_indices[frame_number]
                 ydata = get_component(self.frames[frame])
                 ydata_real = np.real(ydata) if np.iscomplexobj(ydata) else ydata
@@ -4974,44 +4990,65 @@ class PDESolver:
                 ax.set_ylim(np.min(ydata_real), np.max(ydata_real))
                 current_time = target_times[frame_number]
                 ax.set_title(f't = {current_time:.2f}')
-                return line,
+                return (line,)
     
-            ani = FuncAnimation(fig, update, frames=len(target_times), interval=50)
+            ani = FuncAnimation(fig, update_1d, frames=len(target_times), interval=50)
             return ani
     
-        else:  # dim == 2
-            fig = plt.figure(figsize=(14, 8))              
+        # -------------------------
+        # 2D case
+        # -------------------------
+        # Validate mode
+        if mode not in ('surface', 'imshow'):
+            raise ValueError("Invalid mode: choose 'surface' or 'imshow'")
+    
+        # Common data
+        data0 = get_component(self.frames[0])
+    
+        if mode == 'surface':
+            # original surface behavior, but ensure clean updates
+            fig = plt.figure(figsize=(14, 8))
             ax = fig.add_subplot(111, projection='3d')
             ax.set_xlabel('x')
             ax.set_ylabel('y')
             ax.set_zlabel(f'{component.title()} of u')
             ax.zaxis.labelpad = 0
             ax.set_title('Initial condition')
-            
-            data0 = get_component(self.frames[0])
-            surf = [ax.plot_surface(self.X, self.Y, data0, cmap='viridis')]
-            plt.show()
-
-            def update(frame_number):
+    
+            surf = ax.plot_surface(self.X, self.Y, data0, cmap='viridis')
+            plt.tight_layout()
+    
+            def update_surface(frame_number):
                 frame = frame_indices[frame_number]
                 current_data = get_component(self.frames[frame])
                 z_offset = np.max(current_data) + 0.05 * (np.max(current_data) - np.min(current_data))
     
                 ax.clear()
-                surf[0] = ax.plot_surface(self.X, self.Y, current_data,
-                                          cmap='viridis', vmin=-1, vmax=1 if component != 'angle' else np.pi)
-    
+                surf_obj = ax.plot_surface(self.X, self.Y, current_data,
+                                           cmap='viridis',
+                                           vmin=(-np.pi if component == 'angle' else None),
+                                           vmax=(np.pi if component == 'angle' else None))
+                # overlays
                 if overlay == 'contour':
-                    ax.contour(self.X, self.Y, current_data, levels=10, cmap='cool', offset=z_offset)
+                    # place contours slightly below the surface (use offset)
+                    try:
+                        ax.contour(self.X, self.Y, current_data, levels=10, cmap='cool', offset=z_offset)
+                    except Exception:
+                        # fallback: simple contour without offset if not supported
+                        ax.contour(self.X, self.Y, current_data, levels=10, cmap='cool')
+    
                 elif overlay == 'front':
                     dx = self.x_grid[1] - self.x_grid[0]
                     dy = self.y_grid[1] - self.y_grid[0]
-                    du_dx, du_dy = np.gradient(current_data, dx, dy)
+                    # numpy.gradient: axis0 -> y spacing, axis1 -> x spacing
+                    du_dy, du_dx = np.gradient(current_data, dy, dx)
                     grad_norm = np.sqrt(du_dx**2 + du_dy**2)
                     local_max = (grad_norm == maximum_filter(grad_norm, size=5))
-                    normalized = grad_norm[local_max] / np.max(grad_norm)
+                    if np.max(grad_norm) > 0:
+                        normalized = grad_norm[local_max] / np.max(grad_norm)
+                    else:
+                        normalized = np.zeros(np.count_nonzero(local_max))
                     colors = cm.plasma(normalized)
-    
                     ax.scatter(self.X[local_max], self.Y[local_max],
                                z_offset * np.ones_like(self.X[local_max]),
                                color=colors, s=10, alpha=0.8)
@@ -5021,9 +5058,100 @@ class PDESolver:
                 ax.set_zlabel(f'{component.title()} of u')
                 current_time = target_times[frame_number]
                 ax.set_title(f'Solution at t = {current_time:.2f}')
-                return surf
+                return (surf_obj,)
     
-            ani = FuncAnimation(fig, update, frames=len(target_times), interval=50)
+            ani = FuncAnimation(fig, update_surface, frames=len(target_times), interval=50)
+            return ani
+    
+        else:  # mode == 'imshow'
+            fig, ax = plt.subplots(figsize=(7, 6))
+            ax.set_xlabel('x')
+            ax.set_ylabel('y')
+            ax.set_title('Initial condition')
+    
+            # extent uses physical coordinates so axes show real x/y values
+            extent = [self.x_grid[0], self.x_grid[-1], self.y_grid[0], self.y_grid[-1]]
+    
+            if component == 'angle':
+                vmin, vmax = -np.pi, np.pi
+                cmap = 'twilight'
+            else:
+                vmin, vmax = np.min(data0), np.max(data0)
+                cmap = 'viridis'
+    
+            im = ax.imshow(data0, extent=extent, origin='lower', cmap=cmap,
+                           vmin=vmin, vmax=vmax, aspect='auto')
+            cbar = fig.colorbar(im, ax=ax)
+            cbar.set_label(f"{component} of u")
+            plt.tight_layout()
+    
+            # containers for dynamic overlay artists (stored on function object)
+            # update_im.contour_art and update_im.scatter_art will be created dynamically
+    
+            def update_im(frame_number):
+                frame = frame_indices[frame_number]
+                current_data = get_component(self.frames[frame])
+    
+                # update raster
+                im.set_data(current_data)
+                if component != 'angle':
+                    # dynamic per-frame scaling (keeps contrast when amplitude varies)
+                    cmin = np.nanmin(current_data)
+                    cmax = np.nanmax(current_data)
+                    # avoid identical vmin==vmax
+                    if cmax > cmin:
+                        im.set_clim(cmin, cmax)
+    
+                # remove previous contour if exists
+                if overlay == 'contour':
+                    if hasattr(update_im, 'contour_art') and update_im.contour_art is not None:
+                        for coll in update_im.contour_art.collections:
+                            try:
+                                coll.remove()
+                            except Exception:
+                                pass
+                        update_im.contour_art = None
+                    # draw new contours (use meshgrid coords)
+                    try:
+                        update_im.contour_art = ax.contour(self.X, self.Y, current_data, levels=10, cmap='cool')
+                    except Exception:
+                        # fallback: contour with axis coordinates (x_grid, y_grid)
+                        Xc, Yc = np.meshgrid(self.x_grid, self.y_grid)
+                        update_im.contour_art = ax.contour(Xc, Yc, current_data, levels=10, cmap='cool')
+    
+                # remove previous scatter if exists
+                if overlay == 'front':
+                    if hasattr(update_im, 'scatter_art') and update_im.scatter_art is not None:
+                        try:
+                            update_im.scatter_art.remove()
+                        except Exception:
+                            pass
+                        update_im.scatter_art = None
+    
+                    dx = self.x_grid[1] - self.x_grid[0]
+                    dy = self.y_grid[1] - self.y_grid[0]
+                    du_dy, du_dx = np.gradient(current_data, dy, dx)
+                    grad_norm = np.sqrt(du_dx**2 + du_dy**2)
+                    local_max = (grad_norm == maximum_filter(grad_norm, size=5))
+                    if np.max(grad_norm) > 0:
+                        normalized = grad_norm[local_max] / np.max(grad_norm)
+                    else:
+                        normalized = np.zeros(np.count_nonzero(local_max))
+                    colors = cm.plasma(normalized)
+                    update_im.scatter_art = ax.scatter(self.X[local_max], self.Y[local_max],
+                                                       c=colors, s=10, alpha=0.8)
+    
+                current_time = target_times[frame_number]
+                ax.set_title(f'Solution at t = {current_time:.2f}')
+                # return main image plus any overlay artists present so Matplotlib can redraw them
+                artists = [im]
+                if overlay == 'contour' and hasattr(update_im, 'contour_art') and update_im.contour_art is not None:
+                    artists.extend(update_im.contour_art.collections)
+                if overlay == 'front' and hasattr(update_im, 'scatter_art') and update_im.scatter_art is not None:
+                    artists.append(update_im.scatter_art)
+                return tuple(artists)
+    
+            ani = FuncAnimation(fig, update_im, frames=len(target_times), interval=50)
             return ani
 
     def test(self, u_exact, t_eval=None, norm='relative', threshold=1e-2, plot=True, component='real'):
@@ -5147,20 +5275,21 @@ class PDESolver:
                 plt.tight_layout()
                 plt.show()
             else:
+                extent = [-self.Lx/2, self.Lx/2, -self.Ly/2, self.Ly/2]
                 plt.figure(figsize=(15, 5))
                 plt.subplot(1, 3, 1)
                 plt.title("Numerical Solution")
-                plt.imshow(np.abs(u_num), origin='lower', extent=[0, self.Lx, 0, self.Ly], cmap='viridis')
+                plt.imshow(np.abs(u_num), origin='lower', extent=extent, cmap='viridis')
                 plt.colorbar()
     
                 plt.subplot(1, 3, 2)
                 plt.title("Exact Solution")
-                plt.imshow(np.abs(u_ex), origin='lower', extent=[0, self.Lx, 0, self.Ly], cmap='viridis')
+                plt.imshow(np.abs(u_ex), origin='lower', extent=extent, cmap='viridis')
                 plt.colorbar()
     
                 plt.subplot(1, 3, 3)
                 plt.title(f"Error (Norm = {error:.2e})")
-                plt.imshow(np.abs(diff), origin='lower', extent=[0, self.Lx, 0, self.Ly], cmap='inferno')
+                plt.imshow(np.abs(diff), origin='lower', extent=extent, cmap='inferno')
                 plt.colorbar()
                 plt.tight_layout()
                 plt.show()
