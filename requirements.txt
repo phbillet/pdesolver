@@ -6,4 +6,3 @@ ipywidgets
 pytest
 nbmake
 librosa
-opencv-python

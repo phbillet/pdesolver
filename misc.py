@@ -1,7 +1,12 @@
 import numpy as np
+from sympy import sympify
 import matplotlib.pyplot as plt
 from PIL import Image
 import librosa, librosa.display
+import soundfile as sf
+import matplotlib.animation as animation
+import subprocess
+import os
 import soundfile as sf
 
 # Miscellaneous functions
@@ -91,8 +96,6 @@ rectangle_function = lambda x, y: (x - corner1_rectangle[0]) * (x - corner2_rect
 # Cross
 cross_function = lambda x, y: min(abs(x - center_cross[0]) - width_cross, abs(y - center_cross[1]) - height_cross) + 2
 
-from sympy import sympify
-
 def make_symbol(g=None, b=None, V=None):
     """
     Assemble a 2D psiOp symbol from:
@@ -129,6 +132,165 @@ def make_symbol(g=None, b=None, V=None):
     return sympify(symbol_str)
 
 # Sonification
+def sonify_solution(u, Nt, Nx, Lt, Lx, method="pan", samplerate=44100, outfile="sonification.wav"):
+    """
+    Enhanced stereo sonification of a solution u(t,x).
+    Parameters
+    ----------
+    u : ndarray (Nt, Nx)
+        Solution of the PDE.
+    Nt, Nx : int
+        Number of points in time and space.
+    Lt, Lx : float
+        Total length in time and space.
+    method : str
+        "pan" (dynamic barycenter), "fft" (spatial modes), "events" (percussions)
+    samplerate : int
+        Audio sampling rate.
+    outfile : str
+        Name of the output WAV file.
+    """
+    # Rebuild the grids
+    t = np.linspace(0, Lt, Nt)
+    x = np.linspace(-Lx/2, Lx/2, Nx)
+    n_samples = int(Lt * samplerate)
+    time_audio = np.linspace(0, Lt, n_samples)
+    # Base: energy + gradient
+    energy = np.mean(np.abs(u)**2, axis=1)
+    grad = np.mean(np.abs(np.gradient(u, axis=1)), axis=1)
+    signal_base = energy + 0.5*grad
+    signal_base /= np.max(signal_base)+1e-12
+    base_signal = np.interp(np.linspace(0, Nt-1, n_samples), np.arange(Nt), signal_base)
+    left, right = np.zeros_like(base_signal), np.zeros_like(base_signal)
+
+    if method == "pan":
+        bary = (u**2 @ x)/(np.sum(u**2, axis=1)+1e-12)
+        bary /= np.max(np.abs(bary))
+        bary *= 2.0
+        bary_interp = np.interp(np.linspace(0, Nt-1, n_samples), np.arange(Nt), bary)
+        lfo = 0.2*np.sin(2*np.pi*0.3*time_audio)
+        pan = bary_interp + lfo
+        for i, val in enumerate(base_signal):
+            L = np.cos(np.pi/4*(pan[i]+1))
+            R = np.sin(np.pi/4*(pan[i]+1))
+            left[i], right[i] = L*val, R*val
+    elif method == "fft":
+        Y = np.fft.fftshift(np.fft.fft(u, axis=1), axes=1)
+        freqs_x = np.fft.fftshift(np.fft.fftfreq(Nx, d=(x[1]-x[0])))
+        idx = np.argsort(np.mean(np.abs(Y), axis=0))[-5:]
+        freqs_audio = np.linspace(220, 880, len(idx))
+        for j, f_audio in zip(idx, freqs_audio):
+            amp = np.abs(Y[:, j])
+            amp /= np.max(amp)+1e-12
+            amp_interp = np.interp(np.linspace(0, Nt-1, n_samples), np.arange(Nt), amp)
+            pan = np.sign(freqs_x[j])
+            Lgain, Rgain = (0.6,0.4) if pan<0 else (0.4,0.6)
+            wave = amp_interp*(np.sin(2*np.pi*f_audio*time_audio) + 0.5*np.sin(2*np.pi*1.5*f_audio*time_audio))
+            left += Lgain*wave
+            right += Rgain*wave
+    elif method == "events":
+        maxpos = np.argmax(u, axis=1)
+        maxvals = np.max(u, axis=1)
+        threshold = 0.5*np.max(maxvals)
+        for i in range(Nt):
+            if maxvals[i] > threshold:
+                pos = (maxpos[i]-Nx/2)/(Nx/2)
+                Lgain, Rgain = (1-pos)/2, (1+pos)/2
+                center = int(i/Nt*n_samples)
+                dur = int(0.07*samplerate)
+                env = np.linspace(0,1,dur//2, endpoint=False)
+                env = np.concatenate([env, env[::-1]])
+                if len(env) < dur:
+                    env = np.pad(env, (0, dur-len(env)), mode='edge')
+                beep = 0.5*np.sin(2*np.pi*440*np.arange(dur)/samplerate)*env
+                for dt in [-1,0,1]:
+                    idx = center + dt*int(0.02*samplerate)
+                    if 0 <= idx < n_samples-dur:
+                        left[idx:idx+dur] += Lgain*beep
+                        right[idx:idx+dur] += Rgain*beep
+
+    # 🔊 Volume adjustment by method
+    if method == "pan":
+        stereo = np.vstack([left, right]).T * 3.0
+    elif method == "events":
+        stereo = np.vstack([left, right]).T * 10.0
+    else:  # fft
+        stereo = np.vstack([left, right]).T
+
+    # Final normalization
+    stereo /= np.max(np.abs(stereo))+1e-12
+    sf.write(outfile, stereo, samplerate)
+    print(f"Sonification '{method}' exported to {outfile}")
+
+def make_video_with_sound(u, Lt, Lx, outfile="solution_with_sound.mp4", samplerate=44100):
+    """
+    Create a video of the solution u(t,x) with synchronized sound tracks.
+
+    Parameters
+    ----------
+    u : ndarray (Nt, Nx)
+        Solution of the PDE.
+    Nt, Nx : int
+        Number of points in time and space.
+    Lt, Lx : float
+        Total length in time and space.
+    outfile : str
+        Name of the output MP4 file.
+    samplerate : int
+        Audio sampling rate.
+
+    Returns
+    -------
+    str
+        Path to the generated video file.
+    """
+    # 1. Generate matplotlib animation
+    Nt = u.shape[0]
+    Nx = u.shape[1]
+    fig, ax = plt.subplots()
+    line, = ax.plot([], [], lw=2)
+    x = np.linspace(-Lx/2, Lx/2, Nx)
+    ax.set_xlim(-Lx/2, Lx/2)
+    ax.set_ylim(np.min(u), np.max(u))
+    def init():
+        line.set_data([], [])
+        return line,
+    def update(frame):
+        line.set_data(x, u[frame])
+        return line,
+
+    ani = animation.FuncAnimation(fig, update, frames=Nt, init_func=init, blit=True)
+    video_file = "solution.mp4"
+    ani.save(video_file, fps=Nt/Lt, dpi=150)
+    plt.close(fig)
+
+    # 2. Generate sound tracks
+    sonify_solution(u, Nt, Nx, Lt, Lx, method="pan", outfile="u_pan.wav", samplerate=samplerate)
+    sonify_solution(u, Nt, Nx, Lt, Lx, method="fft", outfile="u_fft.wav", samplerate=samplerate)
+    sonify_solution(u, Nt, Nx, Lt, Lx, method="events", outfile="u_events.wav", samplerate=samplerate)
+
+    # 3. Call ffmpeg to mix and merge
+    cmd = [
+        "ffmpeg",
+        "-y",
+        "-i", video_file,
+        "-i", "u_pan.wav",
+        "-i", "u_fft.wav",
+        "-i", "u_events.wav",
+        "-filter_complex", "amix=inputs=3:normalize=0",
+        "-c:v", "copy", "-c:a", "aac", "-b:a", "192k",
+        outfile
+    ]
+    subprocess.run(cmd, check=True)
+
+    # 4. Cleanup (optional)
+    for f in ["u_pan.wav", "u_fft.wav", "u_events.wav", "solution.mp4"]:
+        if os.path.exists(f):
+            os.remove(f)
+
+    return outfile
+
+
 def image_to_sound(
     image_path,
     output_wav="son_from_image.wav",
@@ -141,7 +303,7 @@ def image_to_sound(
     show_plot=True
 ):
     """
-    Convert an image into stereo sound by interpreting it as a spectrogram.
+    Convert an 2D image into stereo sound by interpreting it as a spectrogram.
 
     The input image is treated as a time–frequency representation:
     - The vertical axis corresponds to frequency bins.
@@ -306,70 +468,9 @@ def image_to_sound(
     print(f"✅ Stereo audio saved: {output_wav} ({L/sr:.2f} seconds)")
     return y_stereo, sr
 
-import cv2
-import numpy as np
-
-def video_to_sound(video_path, output_wav="video_son.wav",
-                   frame_step=10,   # 1 frame sur 10
-                   sr=22050, hop_length=256,
-                   scale_log_freq=True, use_hsv=True, gain=5.0):
-    """
-    Sonorise une vidéo en générant un son pour chaque image sous-échantillonnée,
-    puis concatène tous les sons.
-    
-    Paramètres
-    ----------
-    video_path : str
-        Chemin de la vidéo.
-    output_wav : str
-        Nom du fichier WAV de sortie.
-    frame_step : int
-        Intervalle d'images (1 = toutes les images, 10 = 1 sur 10).
-    Autres paramètres : passés à image_to_sound().
-    """
-    cap = cv2.VideoCapture(video_path)
-    if not cap.isOpened():
-        raise IOError(f"Impossible d'ouvrir {video_path}")
-
-    all_audio = []
-
-    frame_idx = 0
-    while True:
-        ret, frame = cap.read()
-        if not ret:
-            break
-
-        if frame_idx % frame_step == 0:
-            # Sauvegarde temporaire image
-            tmp_path = "frame_tmp.png"
-            cv2.imwrite(tmp_path, frame)
-
-            # Appelle la fonction image_to_sound
-            y, _ = image_to_sound(tmp_path,
-                                  output_wav=None, # pas de fichier individuel
-                                  sr=sr,
-                                  hop_length=hop_length,
-                                  scale_log_freq=scale_log_freq,
-                                  use_hsv=use_hsv,
-                                  gain=gain,
-                                  show_plot=False)
-            all_audio.append(y)
-
-        frame_idx += 1
-
-    cap.release()
-
-    # Concaténer tous les fragments
-    if all_audio:
-        y_full = np.concatenate(all_audio)
-        sf.write(output_wav, y_full, sr)
-        print(f"✅ Audio vidéo sauvegardé : {output_wav} ({len(y_full)/sr:.2f} s)")
-        return y_full, sr
-    else:
-        print("⚠️ Aucune frame traitée.")
-        return None, sr
 
 
+# Small symbol dictionnary
 
 operator_symbols = {
     "identity": {
