@@ -134,7 +134,8 @@ def make_symbol(g=None, b=None, V=None):
 # Sonification
 def sonify_solution(u, Nt, Nx, Lt, Lx, method="pan", samplerate=44100, outfile="sonification.wav"):
     """
-    Enhanced stereo sonification of a solution u(t,x).
+    Enhanced stereo sonification of a PDE solution with rich, percussive, and original sounds.
+    
     Parameters
     ----------
     u : ndarray (Nt, Nx)
@@ -142,7 +143,7 @@ def sonify_solution(u, Nt, Nx, Lt, Lx, method="pan", samplerate=44100, outfile="
     Nt, Nx : int
         Number of points in time and space.
     Lt, Lx : float
-        Total length in time and space.
+        Total length in time and in space.
     method : str
         "pan" (dynamic barycenter), "fft" (spatial modes), "events" (percussions)
     samplerate : int
@@ -150,44 +151,54 @@ def sonify_solution(u, Nt, Nx, Lt, Lx, method="pan", samplerate=44100, outfile="
     outfile : str
         Name of the output WAV file.
     """
-    # Rebuild the grids
+    # Grids
     t = np.linspace(0, Lt, Nt)
     x = np.linspace(-Lx/2, Lx/2, Nx)
     n_samples = int(Lt * samplerate)
     time_audio = np.linspace(0, Lt, n_samples)
-    # Base: energy + gradient
+
+    # Base signal: energy + gradient
     energy = np.mean(np.abs(u)**2, axis=1)
     grad = np.mean(np.abs(np.gradient(u, axis=1)), axis=1)
     signal_base = energy + 0.5*grad
-    signal_base /= np.max(signal_base)+1e-12
+    signal_base /= np.max(signal_base) + 1e-12
     base_signal = np.interp(np.linspace(0, Nt-1, n_samples), np.arange(Nt), signal_base)
+
     left, right = np.zeros_like(base_signal), np.zeros_like(base_signal)
 
+    # --- PAN: dynamic barycenter with harmonics + vibrato ---
     if method == "pan":
-        bary = (u**2 @ x)/(np.sum(u**2, axis=1)+1e-12)
-        bary /= np.max(np.abs(bary))
-        bary *= 2.0
+        bary = (u**2 @ x) / (np.sum(u**2, axis=1) + 1e-12)
+        bary /= np.max(np.abs(bary)) + 1e-12
         bary_interp = np.interp(np.linspace(0, Nt-1, n_samples), np.arange(Nt), bary)
-        lfo = 0.2*np.sin(2*np.pi*0.3*time_audio)
+        lfo = 0.2 * np.sin(2*np.pi*0.3*time_audio)  # vibrato
         pan = bary_interp + lfo
         for i, val in enumerate(base_signal):
+            freq = 220 + 220 * (val)  # frequency mod by amplitude
+            wave = val * (np.sin(2*np.pi*freq*time_audio[i]) + 0.5*np.sin(2*np.pi*1.5*freq*time_audio[i]))
             L = np.cos(np.pi/4*(pan[i]+1))
             R = np.sin(np.pi/4*(pan[i]+1))
-            left[i], right[i] = L*val, R*val
+            left[i], right[i] = L*wave, R*wave
+
+    # --- FFT: spatial modes with sin + square waves ---
     elif method == "fft":
         Y = np.fft.fftshift(np.fft.fft(u, axis=1), axes=1)
         freqs_x = np.fft.fftshift(np.fft.fftfreq(Nx, d=(x[1]-x[0])))
-        idx = np.argsort(np.mean(np.abs(Y), axis=0))[-5:]
+        idx = np.argsort(np.mean(np.abs(Y), axis=0))[-5:]  # 5 dominant modes
         freqs_audio = np.linspace(220, 880, len(idx))
         for j, f_audio in zip(idx, freqs_audio):
             amp = np.abs(Y[:, j])
-            amp /= np.max(amp)+1e-12
+            amp /= np.max(amp) + 1e-12
             amp_interp = np.interp(np.linspace(0, Nt-1, n_samples), np.arange(Nt), amp)
             pan = np.sign(freqs_x[j])
-            Lgain, Rgain = (0.6,0.4) if pan<0 else (0.4,0.6)
-            wave = amp_interp*(np.sin(2*np.pi*f_audio*time_audio) + 0.5*np.sin(2*np.pi*1.5*f_audio*time_audio))
-            left += Lgain*wave
-            right += Rgain*wave
+            Lgain, Rgain = (0.6,0.4) if pan < 0 else (0.4,0.6)
+            # wave = sin + square, modulated by amplitude
+            wave = amp_interp * (np.sin(2*np.pi*f_audio*time_audio) +
+                                 0.3*np.sign(np.sin(2*np.pi*f_audio*time_audio)))
+            left += Lgain * wave
+            right += Rgain * wave
+
+    # --- EVENTS: percussive beeps with pitch + double hit ---
     elif method == "events":
         maxpos = np.argmax(u, axis=1)
         maxvals = np.max(u, axis=1)
@@ -202,25 +213,28 @@ def sonify_solution(u, Nt, Nx, Lt, Lx, method="pan", samplerate=44100, outfile="
                 env = np.concatenate([env, env[::-1]])
                 if len(env) < dur:
                     env = np.pad(env, (0, dur-len(env)), mode='edge')
-                beep = 0.5*np.sin(2*np.pi*440*np.arange(dur)/samplerate)*env
-                for dt in [-1,0,1]:
+                freq = 440 + 200*pos  # pitch varies with position
+                beep = 0.5*np.sign(np.sin(2*np.pi*freq*np.arange(dur)/samplerate)) * env
+                for dt in [-1,0,1]:  # double/triple hit
                     idx = center + dt*int(0.02*samplerate)
                     if 0 <= idx < n_samples-dur:
                         left[idx:idx+dur] += Lgain*beep
                         right[idx:idx+dur] += Rgain*beep
 
-    # 🔊 Volume adjustment by method
-    if method == "pan":
-        stereo = np.vstack([left, right]).T * 3.0
-    elif method == "events":
-        stereo = np.vstack([left, right]).T * 10.0
-    else:  # fft
-        stereo = np.vstack([left, right]).T
+    # --- Auto-gain normalization by RMS ---
+    stereo = np.vstack([left, right]).T
+    rms = np.sqrt(np.mean(stereo**2))
+    target_rms = 0.1
+    if rms > 1e-12:
+        stereo *= (target_rms / rms)
 
-    # Final normalization
-    stereo /= np.max(np.abs(stereo))+1e-12
+    # --- Peak normalization ---
+    stereo /= np.max(np.abs(stereo)) + 1e-12
+
+    # Write WAV
     sf.write(outfile, stereo, samplerate)
     print(f"Sonification '{method}' exported to {outfile}")
+
 
 def make_video_with_sound(u, Lt, Lx, outfile="solution_with_sound.mp4", samplerate=44100):
     """
