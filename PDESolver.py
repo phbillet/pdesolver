@@ -228,7 +228,7 @@ import librosa, librosa.display
 import soundfile as sf
 from misc import * 
 from IPython.display import display, clear_output, HTML, Video
-from ipywidgets import interact, FloatSlider, Dropdown, widgets
+from ipywidgets import interact, FloatSlider, Dropdown, VBox, HBox, interactive_output
 from itertools import product
 import os
 
@@ -987,8 +987,6 @@ class PseudoDifferentialOperator:
         if self.dim == 1:
             x,  = self.vars_x
             xi = symbols('xi', real=True)
-            print("x = ", x)
-            print("xi = ", xi)
             return {
                 'dx/dt': diff(self.symbol, xi),
                 'dxi/dt': -diff(self.symbol, x)
@@ -1095,7 +1093,7 @@ class PseudoDifferentialOperator:
         p_star = self.formal_adjoint()
         return simplify(p - p_star).equals(0)
 
-    def visualize_fiber(self, x_grid, xi_grid, y0=0.0, x0=0.0):
+    def visualize_fiber(self, x_grid, xi_grid, x0=0.0, y0=0.0):
         """
         Plot the cotangent fiber structure at a fixed spatial point (x₀[, y₀]).
     
@@ -1347,6 +1345,8 @@ class PseudoDifferentialOperator:
             grad_norm = np.sqrt(grad_x**2 + grad_xi**2)
             plt.pcolormesh(X, XI, grad_norm, cmap='inferno', shading='auto')
             plt.colorbar(label='|∇p|')
+            plt.xlabel('x')
+            plt.ylabel('ξ')
             plt.title('Gradient Norm (High Near Zeros)')
             plt.grid(True)
             plt.show()
@@ -1358,6 +1358,8 @@ class PseudoDifferentialOperator:
             grad_norm = np.sqrt(np.abs(grad_xi)**2 + np.abs(grad_eta)**2)
             plt.pcolormesh(xi_grid, eta_grid, grad_norm, cmap='inferno', shading='auto')
             plt.colorbar(label='|∇p|')
+            plt.xlabel('ξ')
+            plt.ylabel('η')
             plt.title(f'Gradient Norm at x={x0}, y={y0}')
             plt.grid(True)
             plt.show()
@@ -2009,7 +2011,7 @@ class PseudoDifferentialOperator:
         expr = pseudo_op.expr
         vars_x = pseudo_op.vars_x
     
-        mode_selector = Dropdown(
+        mode_selector_1D = Dropdown(
             options=[
                 'Symbol Amplitude',
                 'Symbol Phase',
@@ -2018,6 +2020,21 @@ class PseudoDifferentialOperator:
                 'Characteristic Set',
                 'Characteristic Gradient',
                 'Group Velocity Field',
+                'Symplectic Vector Field',
+                'Hamiltonian Flow',
+            ],
+            value='Symbol Amplitude',
+            description='Mode:'
+        )
+
+        mode_selector_2D = Dropdown(
+            options=[
+                'Symbol Amplitude',
+                'Symbol Phase',
+                'Micro-Support (1/|p|)',
+                'Cotangent Fiber',
+                'Characteristic Set',
+                'Characteristic Gradient',
                 'Symplectic Vector Field',
                 'Hamiltonian Flow',
             ],
@@ -2035,6 +2052,9 @@ class PseudoDifferentialOperator:
             grad_func = lambdify((x, xi), diff(expr, xi), 'numpy')
             symplectic_func = lambdify((x, xi), [diff(expr, xi), -diff(expr, x)], 'numpy')
             symbol_func = lambdify((x, xi), expr, 'numpy')
+
+            xi_slider = FloatSlider(min=xi_range[0], max=xi_range[1], step=0.1, value=1.0, description='ξ₀')
+            x_slider = FloatSlider(min=xlim[0], max=xlim[1], step=0.1, value=0.0, description='x₀')
     
             def plot_1d(mode, xi0, x0):
                 X = x_vals[:, None]
@@ -2042,26 +2062,31 @@ class PseudoDifferentialOperator:
                 if mode == 'Group Velocity Field':
                     V = grad_func(X, xi0)
                     plt.quiver(X, V, np.ones_like(V), V, scale=10, width=0.004)
+                    plt.xlabel('x')
                     plt.title(f'Group Velocity Field at ξ={xi0:.2f}')
     
                 elif mode == 'Micro-Support (1/|p|)':
                     Z = 1 / (np.abs(symbol_func(X, xi0)) + 1e-10)
                     plt.plot(x_vals, Z)
+                    plt.xlabel('x')
                     plt.title(f'Micro-Support (1/|p|) at ξ={xi0:.2f}')
     
                 elif mode == 'Symplectic Vector Field':
                     U, V = symplectic_func(X, xi0)
                     plt.quiver(X, V, U, V, scale=10, width=0.004)
+                    plt.xlabel('x')
                     plt.title(f'Symplectic Field at ξ={xi0:.2f}')
     
                 elif mode == 'Symbol Amplitude':
                     Z = np.abs(symbol_func(X, xi0))
                     plt.plot(x_vals, Z)
+                    plt.xlabel('x')
                     plt.title(f'Symbol Amplitude |p(x,ξ)| at ξ={xi0:.2f}')
     
                 elif mode == 'Symbol Phase':
                     Z = np.angle(symbol_func(X, xi0))
                     plt.plot(x_vals, Z)
+                    plt.xlabel('x')
                     plt.title(f'Symbol Phase arg(p(x,ξ)) at ξ={xi0:.2f}')
     
                 elif mode == 'Cotangent Fiber':
@@ -2076,47 +2101,70 @@ class PseudoDifferentialOperator:
                 elif mode == 'Hamiltonian Flow':
                     pseudo_op.plot_hamiltonian_flow(x0=x0, xi0=xi0)
     
-            interact(plot_1d,
-                     mode=mode_selector,
-                     xi0=FloatSlider(min=xi_range[0], max=xi_range[1], step=0.1, value=1.0, description='ξ₀'),
-                     x0=FloatSlider(min=xlim[0], max=xlim[1], step=0.1, value=0.0, description='x₀'))
-    
+            # --- Dynamic container for sliders ---
+            controls_box = VBox([mode_selector_1D, xi_slider, x_slider])
+            # --- Function to adjust visible sliders based on mode ---
+            def update_controls(change):
+                mode = change['new']
+                # modes that depend only on xi and eta
+                if mode in ['Symbol Amplitude', 'Symbol Phase', 'Micro-Support (1/|p|)',
+                            'Group Velocity Field', 'Symplectic Vector Field']:
+                    controls_box.children = [mode_selector_1D, xi_slider]
+                # modes that require xi and x
+                elif mode in ['Hamiltonian Flow']:
+                    controls_box.children = [mode_selector_1D, xi_slider, x_slider]
+                # modes that require nothing
+                elif mode in ['Cotangent Fiber', 'Characteristic Set', 'Characteristic Gradient']:
+                    controls_box.children = [mode_selector_1D]
+            mode_selector_1D.observe(update_controls, names='value')
+            update_controls({'new': mode_selector_1D.value}) 
+            # --- Interactive binding ---
+            out = interactive_output(plot_1d, {'mode': mode_selector_1D, 'xi0': xi_slider, 'x0': x_slider})
+            display(VBox([controls_box, out]))
+
         elif dim == 2:
             x, y = vars_x
             xi, eta = symbols('xi eta', real=True)
-            grad_func = lambdify((x, y, xi, eta), [diff(expr, xi), diff(expr, eta)], 'numpy')
             symplectic_func = lambdify((x, y, xi, eta), [diff(expr, xi), diff(expr, eta)], 'numpy')
             symbol_func = lambdify((x, y, xi, eta), expr, 'numpy')
+
+            xi_slider=FloatSlider(min=xi_range[0], max=xi_range[1], step=0.1, value=1.0, description='ξ₀')
+            eta_slider=FloatSlider(min=eta_range[0], max=eta_range[1], step=0.1, value=1.0, description='η₀')
+            x_slider=FloatSlider(min=xlim[0], max=xlim[1], step=0.1, value=0.0, description='x₀')
+            y_slider=FloatSlider(min=ylim[0], max=ylim[1], step=0.1, value=0.0, description='y₀')
     
             def plot_2d(mode, xi0, eta0, x0, y0):
                 X, Y = np.meshgrid(x_vals, y_vals, indexing='ij')
     
-                if mode == 'Group Velocity Field':
-                    U, V = grad_func(X, Y, xi0, eta0)
-                    plt.quiver(X, Y, U, V, scale=10, width=0.004)
-                    plt.title(f'Group Velocity Field at ξ={xi0:.2f}, η={eta0:.2f}')
-    
-                elif mode == 'Micro-Support (1/|p|)':
+                if mode == 'Micro-Support (1/|p|)':
                     Z = 1 / (np.abs(symbol_func(X, Y, xi0, eta0)) + 1e-10)
                     plt.pcolormesh(X, Y, Z, shading='auto', cmap='inferno')
                     plt.colorbar(label='1/|p|')
+                    plt.xlabel('x')
+                    plt.ylabel('y')
                     plt.title(f'Micro-Support at ξ={xi0:.2f}, η={eta0:.2f}')
     
                 elif mode == 'Symplectic Vector Field':
                     U, V = symplectic_func(X, Y, xi0, eta0)
                     plt.quiver(X, Y, U, V, scale=10, width=0.004)
+                    plt.xlabel('x')
+                    plt.ylabel('y')
                     plt.title(f'Symplectic Field at ξ={xi0:.2f}, η={eta0:.2f}')
     
                 elif mode == 'Symbol Amplitude':
                     Z = np.abs(symbol_func(X, Y, xi0, eta0))
                     plt.pcolormesh(X, Y, Z, shading='auto')
                     plt.colorbar(label='|p(x,y,ξ,η)|')
+                    plt.xlabel('x')
+                    plt.ylabel('y')
                     plt.title(f'Symbol Amplitude at ξ={xi0:.2f}, η={eta0:.2f}')
     
                 elif mode == 'Symbol Phase':
                     Z = np.angle(symbol_func(X, Y, xi0, eta0))
                     plt.pcolormesh(X, Y, Z, shading='auto', cmap='twilight')
                     plt.colorbar(label='arg(p)')
+                    plt.xlabel('x')
+                    plt.ylabel('y')
                     plt.title(f'Symbol Phase at ξ={xi0:.2f}, η={eta0:.2f}')
     
                 elif mode == 'Cotangent Fiber':
@@ -2134,12 +2182,25 @@ class PseudoDifferentialOperator:
                 elif mode == 'Hamiltonian Flow':
                     pseudo_op.plot_hamiltonian_flow(x0=x0, y0=y0, xi0=xi0, eta0=eta0)
                     
-            interact(plot_2d,
-                     mode=mode_selector,
-                     xi0=FloatSlider(min=xi_range[0], max=xi_range[1], step=0.1, value=1.0, description='ξ₀'),
-                     eta0=FloatSlider(min=eta_range[0], max=eta_range[1], step=0.1, value=1.0, description='η₀'),
-                     x0=FloatSlider(min=xlim[0], max=xlim[1], step=0.1, value=0.0, description='x₀'),
-                     y0=FloatSlider(min=ylim[0], max=ylim[1], step=0.1, value=0.0, description='y₀'))
+            # --- Dynamic container for sliders ---
+            controls_box = VBox([mode_selector_2D, xi_slider, eta_slider, x_slider, y_slider])
+            # --- Function to adjust visible sliders based on mode ---
+            def update_controls(change):
+                mode = change['new']
+                # modes that depend only on xi
+                if mode in ['Symbol Amplitude', 'Symbol Phase', 'Micro-Support (1/|p|)', 'Symplectic Vector Field']:
+                    controls_box.children = [mode_selector_2D, xi_slider, eta_slider]
+                # modes that require xi, eta, x and y
+                elif mode in ['Hamiltonian Flow']:
+                    controls_box.children = [mode_selector_2D, xi_slider, eta_slider, x_slider, y_slider]
+                # modes that require x and y
+                elif mode in ['Cotangent Fiber', 'Characteristic Set', 'Characteristic Gradient']:
+                    controls_box.children = [mode_selector_2D, x_slider, y_slider]
+            mode_selector_2D.observe(update_controls, names='value')
+            update_controls({'new': mode_selector_2D.value}) 
+            # --- Interactive binding ---
+            out = interactive_output(plot_2d, {'mode': mode_selector_2D, 'xi0': xi_slider, 'eta0': eta_slider, 'x0': x_slider, 'y0': y_slider})
+            display(VBox([controls_box, out]))
 
 class PDESolver:
     """
