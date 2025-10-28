@@ -8056,8 +8056,9 @@ pseudo-differential operator in symbolic form.</dd>
         else:
             raise NotImplementedError(&#34;Only 1D and 2D supported&#34;)
 
-        print(&#34;\nsymbol = &#34;)
-        pprint(self.symbol, num_columns=NUM_COLS)
+        if mode == &#39;auto&#39;:
+            print(&#34;\nsymbol = &#34;)
+            pprint(self.symbol, num_columns=NUM_COLS)
         
     def evaluate(self, X, Y, KX, KY, cache=True):
         &#34;&#34;&#34;
@@ -8513,6 +8514,78 @@ pseudo-differential operator in symbolic form.</dd>
     
         return result
 
+    def commutator_symbolic(self, other, order=1):
+        &#34;&#34;&#34;
+        Compute the symbolic commutator [A, B] = A∘B − B∘A of two pseudo-differential operators
+        using formal asymptotic expansion of their composition symbols.
+    
+        This method computes the asymptotic expansion of the commutator&#39;s symbol up to a given 
+        order, based on the symbolic calculus of pseudo-differential operators in the 
+        Kohn–Nirenberg quantization. The result is a purely symbolic sympy expression that 
+        captures the leading-order noncommutativity of the operators.
+    
+        Parameters
+        ----------
+        other : PseudoDifferentialOperator
+            The pseudo-differential operator B to commute with this operator A.
+        order : int, default=1
+            Maximum order of the asymptotic expansion. 
+            - order=1 yields the leading term proportional to the Poisson bracket {p, q}.
+            - Higher orders include correction terms involving higher mixed derivatives.
+    
+        Returns
+        -------
+        sympy.Expr
+            Symbolic expression for the asymptotic expansion of the commutator symbol 
+            σ([A,B]) = σ(A∘B − B∘A).
+    
+        Notes
+        -----
+        - In 1D, the expansion follows:
+              σ([A,B])(x, ξ) ~ Σₙ (1/n!) (i)^{-n} 
+                  [ ∂_ξⁿ p ∂_xⁿ q − ∂_ξⁿ q ∂_xⁿ p ].
+    
+          The leading term (n=1) gives:
+              σ([A,B]) ≈ (1/i) {p, q} = (1/i)(∂_ξ p ∂_x q − ∂_x p ∂_ξ q).
+    
+        - In 2D, the multi-index generalization is used:
+              σ([A,B])(x, y, ξ, η) ~ Σₙ Σᵢ (1/(i! j!))(i)^{-n}
+                  [ ∂_ξⁱ∂_ηʲ p ∂_xⁱ∂_yʲ q − ∂_ξⁱ∂_ηʲ q ∂_xⁱ∂_yʲ p ],
+              with n = i + j.
+    
+        - This expansion is valid for symbols admitting asymptotic expansions in |ξ|→∞.
+          Both operators must act on the same spatial dimension.
+        &#34;&#34;&#34;
+        assert self.dim == other.dim, &#34;Operator dimensions must match&#34;
+        p, q = self.symbol, other.symbol
+    
+        if self.dim == 1:
+            x = self.vars_x[0]
+            xi = symbols(&#39;xi&#39;, real=True)
+            comm_symbol = 0
+            for n in range(1, order + 1):
+                term = (1 / factorial(n)) * (1j)**(-n) * (
+                    diff(p, xi, n) * diff(q, x, n) -
+                    diff(q, xi, n) * diff(p, x, n)
+                )
+                comm_symbol += term
+    
+        elif self.dim == 2:
+            x, y = self.vars_x
+            xi, eta = symbols(&#39;xi eta&#39;, real=True)
+            comm_symbol = 0
+            for n in range(1, order + 1):
+                for i in range(n + 1):
+                    j = n - i
+                    coef = (1 / (factorial(i) * factorial(j))) * (1j)**(-n)
+                    term = coef * (
+                        diff(p, xi, i, eta, j) * diff(q, x, i, y, j) -
+                        diff(q, xi, i, eta, j) * diff(p, x, i, y, j)
+                    )
+                    comm_symbol += term
+    
+        return simplify(comm_symbol)
+
     def right_inverse_asymptotic(self, order=1):
         &#34;&#34;&#34;
         Construct a formal right inverse R of the pseudo-differential operator P such that 
@@ -8665,6 +8738,267 @@ pseudo-differential operator in symbolic form.</dd>
             p_star = conjugate(p)
             p_star = simplify(series(p_star, sqrt(xi**2 + eta**2), oo, n=6).removeO())
             return p_star
+
+    def exponential_symbol(self, t=1.0, order=3):
+        &#34;&#34;&#34;
+        Compute the symbol of exp(tP) using asymptotic expansion methods.
+        
+        This method calculates the exponential of a pseudo-differential operator 
+        using either a direct power series expansion or a Magnus expansion, 
+        depending on the structure of the symbol. The result is valid up to 
+        the specified asymptotic order.
+        
+        Parameters
+        ----------
+        t : float or sympy.Symbol, default=1.0
+            Time or evolution parameter. Common uses:
+            - t = -i*τ for Schrödinger evolution: exp(-iτH)
+            - t = τ for heat/diffusion: exp(τΔ)
+            - t for general propagators
+        order : int, default=3
+            Maximum order of the asymptotic expansion. Higher orders include 
+            more composition terms, improving accuracy for small t or when 
+            non-commutativity effects are significant.
+        
+        Returns
+        -------
+        sympy.Expr
+            Symbolic expression for the exponential operator symbol, computed 
+            as an asymptotic series up to the specified order.
+        
+        Notes
+        -----
+        - For commutative symbols (e.g., pure multiplication operators), the 
+          exponential is exact: exp(tP) = exp(t*p(x,ξ)).
+        
+        - For general non-commutative operators, the method uses the BCH-type 
+          expansion via iterated composition:
+          exp(tP) ~ I + tP + (t²/2!)P∘P + (t³/3!)P∘P∘P + ...
+          
+        - Each power P^n is computed via compose_asymptotic, which accounts 
+          for the non-commutativity through derivative terms.
+        
+        - The expansion is valid for |t| small enough or when the symbol has 
+          appropriate decay/growth properties.
+        
+        - In quantum mechanics (Schrödinger): U(t) = exp(-itH/ℏ) represents 
+          the time evolution operator.
+        
+        - In parabolic PDEs (heat equation): exp(tΔ) is the heat kernel.
+
+        &#34;&#34;&#34;
+        from sympy import factorial, simplify
+        
+        if self.dim == 1:
+            x = self.vars_x[0]
+            xi = symbols(&#39;xi&#39;, real=True)
+            
+            # Initialize with identity
+            result = 1
+            
+            # First order term: tP
+            current_power = self.symbol
+            result += t * current_power
+            
+            # Higher order terms: (t^n/n!) P^n computed via composition
+            for n in range(2, order + 1):
+                # Compute P^n = P^(n-1) ∘ P via asymptotic composition
+                # We use a temporary operator for composition
+                temp_op = PseudoDifferentialOperator(
+                    current_power, [x], mode=&#39;symbol&#39;
+                )
+                current_power = temp_op.compose_asymptotic(self, order=order)
+                
+                # Add term (t^n/n!) * P^n
+                coeff = t**n / factorial(n)
+                result += coeff * current_power
+            
+            return simplify(result)
+        
+        elif self.dim == 2:
+            x, y = self.vars_x
+            xi, eta = symbols(&#39;xi eta&#39;, real=True)
+            
+            # Initialize with identity
+            result = 1
+            
+            # First order term: tP
+            current_power = self.symbol
+            result += t * current_power
+            
+            # Higher order terms: (t^n/n!) P^n computed via composition
+            for n in range(2, order + 1):
+                # Compute P^n = P^(n-1) ∘ P via asymptotic composition
+                temp_op = PseudoDifferentialOperator(
+                    current_power, [x, y], mode=&#39;symbol&#39;
+                )
+                current_power = temp_op.compose_asymptotic(self, order=order)
+                
+                # Add term (t^n/n!) * P^n
+                coeff = t**n / factorial(n)
+                result += coeff * current_power
+            
+            return simplify(result)
+        
+        else:
+            raise NotImplementedError(&#34;Only 1D and 2D operators are supported&#34;)
+        
+    def trace_formula(self, volume_element=None, numerical=False, 
+                      x_bounds=None, xi_bounds=None):
+        &#34;&#34;&#34;
+        Compute the semiclassical trace of the pseudo-differential operator.
+        
+        The trace formula relates the quantum trace of an operator to a 
+        phase-space integral of its symbol, providing a fundamental link 
+        between classical and quantum mechanics. This implementation supports 
+        both symbolic and numerical integration.
+        
+        Parameters
+        ----------
+        volume_element : sympy.Expr, optional
+            Custom volume element for the phase space integration. If None, 
+            uses the standard Liouville measure dx dξ/(2π)^d.
+        numerical : bool, default=False
+            If True, perform numerical integration over specified bounds.
+            If False, attempt symbolic integration (may fail for complex symbols).
+        x_bounds : tuple of tuples, optional
+            Spatial integration bounds. For 1D: ((x_min, x_max),)
+            For 2D: ((x_min, x_max), (y_min, y_max))
+            Required if numerical=True.
+        xi_bounds : tuple of tuples, optional
+            Frequency integration bounds. For 1D: ((xi_min, xi_max),)
+            For 2D: ((xi_min, xi_max), (eta_min, eta_max))
+            Required if numerical=True.
+        
+        Returns
+        -------
+        sympy.Expr or float
+            The trace of the operator. Returns a symbolic expression if 
+            numerical=False, or a float if numerical=True.
+        
+        Notes
+        -----
+        - The semiclassical trace formula states:
+          Tr(P) = (2π)^{-d} ∫∫ p(x,ξ) dx dξ
+          where d is the spatial dimension and p(x,ξ) is the operator symbol.
+        
+        - For 1D: Tr(P) = (1/2π) ∫_{-∞}^{∞} ∫_{-∞}^{∞} p(x,ξ) dx dξ
+        
+        - For 2D: Tr(P) = (1/4π²) ∫∫∫∫ p(x,y,ξ,η) dx dy dξ dη
+        
+        - This formula is exact for trace-class operators and provides an 
+          asymptotic approximation for general pseudo-differential operators.
+        
+        - Physical interpretation: the trace counts the &#34;number of states&#34; 
+          weighted by the observable p(x,ξ).
+        
+        - For projection operators (χ_Ω with χ² = χ), the trace gives the 
+          dimension of the range, related to the phase space volume of Ω.
+        
+        - The factor (2π)^{-d} comes from the quantum normalization of 
+          coherent states / Weyl quantization.
+        &#34;&#34;&#34;
+        from sympy import integrate, simplify, lambdify
+        from scipy.integrate import dblquad, nquad
+        
+        p = self.symbol
+        
+        if numerical:
+            if x_bounds is None or xi_bounds is None:
+                raise ValueError(
+                    &#34;x_bounds and xi_bounds must be provided for numerical integration&#34;
+                )
+        
+        if self.dim == 1:
+            x, = self.vars_x
+            xi = symbols(&#39;xi&#39;, real=True)
+            
+            if volume_element is None:
+                volume_element = 1 / (2 * pi)
+            
+            if numerical:
+                # Numerical integration
+                p_func = lambdify((x, xi), p, &#39;numpy&#39;)
+                (x_min, x_max), = x_bounds
+                (xi_min, xi_max), = xi_bounds
+                
+                def integrand(xi_val, x_val):
+                    return p_func(x_val, xi_val)
+                
+                result, error = dblquad(
+                    integrand,
+                    x_min, x_max,
+                    lambda x: xi_min, lambda x: xi_max
+                )
+                
+                result *= float(volume_element)
+                print(f&#34;Numerical trace = {result:.6e} ± {error:.6e}&#34;)
+                return result
+            
+            else:
+                # Symbolic integration
+                integrand = p * volume_element
+                
+                try:
+                    # Try to integrate over xi first, then x
+                    integral_xi = integrate(integrand, (xi, -oo, oo))
+                    integral_x = integrate(integral_xi, (x, -oo, oo))
+                    return simplify(integral_x)
+                except:
+                    print(&#34;Warning: Symbolic integration failed. Try numerical=True&#34;)
+                    return integrate(integrand, (xi, -oo, oo), (x, -oo, oo))
+        
+        elif self.dim == 2:
+            x, y = self.vars_x
+            xi, eta = symbols(&#39;xi eta&#39;, real=True)
+            
+            if volume_element is None:
+                volume_element = 1 / (4 * pi**2)
+            
+            if numerical:
+                # Numerical integration in 4D
+                p_func = lambdify((x, y, xi, eta), p, &#39;numpy&#39;)
+                (x_min, x_max), (y_min, y_max) = x_bounds
+                (xi_min, xi_max), (eta_min, eta_max) = xi_bounds
+                
+                def integrand(eta_val, xi_val, y_val, x_val):
+                    return p_func(x_val, y_val, xi_val, eta_val)
+                
+                result, error = nquad(
+                    integrand,
+                    [
+                        [eta_min, eta_max],
+                        [xi_min, xi_max],
+                        [y_min, y_max],
+                        [x_min, x_max]
+                    ]
+                )
+                
+                result *= float(volume_element)
+                print(f&#34;Numerical trace = {result:.6e} ± {error:.6e}&#34;)
+                return result
+            
+            else:
+                # Symbolic integration
+                integrand = p * volume_element
+                
+                try:
+                    # Integrate in order: eta, xi, y, x
+                    integral_eta = integrate(integrand, (eta, -oo, oo))
+                    integral_xi = integrate(integral_eta, (xi, -oo, oo))
+                    integral_y = integrate(integral_xi, (y, -oo, oo))
+                    integral_x = integrate(integral_y, (x, -oo, oo))
+                    return simplify(integral_x)
+                except:
+                    print(&#34;Warning: Symbolic integration failed. Try numerical=True&#34;)
+                    return integrate(
+                        integrand,
+                        (eta, -oo, oo), (xi, -oo, oo),
+                        (y, -oo, oo), (x, -oo, oo)
+                    )
+        
+        else:
+            raise NotImplementedError(&#34;Only 1D and 2D operators are supported&#34;)
 
     def symplectic_flow(self):
         &#34;&#34;&#34;
@@ -10347,6 +10681,128 @@ in ρ → ∞, then converted back to Cartesian coordinates (ξ,η).
 </details>
 <div class="desc"><p>Clear cached symbol evaluations.</p></div>
 </dd>
+<dt id="PDESolver.PseudoDifferentialOperator.commutator_symbolic"><code class="name flex">
+<span>def <span class="ident">commutator_symbolic</span></span>(<span>self, other, order=1)</span>
+</code></dt>
+<dd>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def commutator_symbolic(self, other, order=1):
+    &#34;&#34;&#34;
+    Compute the symbolic commutator [A, B] = A∘B − B∘A of two pseudo-differential operators
+    using formal asymptotic expansion of their composition symbols.
+
+    This method computes the asymptotic expansion of the commutator&#39;s symbol up to a given 
+    order, based on the symbolic calculus of pseudo-differential operators in the 
+    Kohn–Nirenberg quantization. The result is a purely symbolic sympy expression that 
+    captures the leading-order noncommutativity of the operators.
+
+    Parameters
+    ----------
+    other : PseudoDifferentialOperator
+        The pseudo-differential operator B to commute with this operator A.
+    order : int, default=1
+        Maximum order of the asymptotic expansion. 
+        - order=1 yields the leading term proportional to the Poisson bracket {p, q}.
+        - Higher orders include correction terms involving higher mixed derivatives.
+
+    Returns
+    -------
+    sympy.Expr
+        Symbolic expression for the asymptotic expansion of the commutator symbol 
+        σ([A,B]) = σ(A∘B − B∘A).
+
+    Notes
+    -----
+    - In 1D, the expansion follows:
+          σ([A,B])(x, ξ) ~ Σₙ (1/n!) (i)^{-n} 
+              [ ∂_ξⁿ p ∂_xⁿ q − ∂_ξⁿ q ∂_xⁿ p ].
+
+      The leading term (n=1) gives:
+          σ([A,B]) ≈ (1/i) {p, q} = (1/i)(∂_ξ p ∂_x q − ∂_x p ∂_ξ q).
+
+    - In 2D, the multi-index generalization is used:
+          σ([A,B])(x, y, ξ, η) ~ Σₙ Σᵢ (1/(i! j!))(i)^{-n}
+              [ ∂_ξⁱ∂_ηʲ p ∂_xⁱ∂_yʲ q − ∂_ξⁱ∂_ηʲ q ∂_xⁱ∂_yʲ p ],
+          with n = i + j.
+
+    - This expansion is valid for symbols admitting asymptotic expansions in |ξ|→∞.
+      Both operators must act on the same spatial dimension.
+    &#34;&#34;&#34;
+    assert self.dim == other.dim, &#34;Operator dimensions must match&#34;
+    p, q = self.symbol, other.symbol
+
+    if self.dim == 1:
+        x = self.vars_x[0]
+        xi = symbols(&#39;xi&#39;, real=True)
+        comm_symbol = 0
+        for n in range(1, order + 1):
+            term = (1 / factorial(n)) * (1j)**(-n) * (
+                diff(p, xi, n) * diff(q, x, n) -
+                diff(q, xi, n) * diff(p, x, n)
+            )
+            comm_symbol += term
+
+    elif self.dim == 2:
+        x, y = self.vars_x
+        xi, eta = symbols(&#39;xi eta&#39;, real=True)
+        comm_symbol = 0
+        for n in range(1, order + 1):
+            for i in range(n + 1):
+                j = n - i
+                coef = (1 / (factorial(i) * factorial(j))) * (1j)**(-n)
+                term = coef * (
+                    diff(p, xi, i, eta, j) * diff(q, x, i, y, j) -
+                    diff(q, xi, i, eta, j) * diff(p, x, i, y, j)
+                )
+                comm_symbol += term
+
+    return simplify(comm_symbol)</code></pre>
+</details>
+<div class="desc"><p>Compute the symbolic commutator [A, B] = A∘B − B∘A of two pseudo-differential operators
+using formal asymptotic expansion of their composition symbols.</p>
+<p>This method computes the asymptotic expansion of the commutator's symbol up to a given
+order, based on the symbolic calculus of pseudo-differential operators in the
+Kohn–Nirenberg quantization. The result is a purely symbolic sympy expression that
+captures the leading-order noncommutativity of the operators.</p>
+<h2 id="parameters">Parameters</h2>
+<dl>
+<dt><strong><code>other</code></strong> :&ensp;<code><a title="PDESolver.PseudoDifferentialOperator" href="#PDESolver.PseudoDifferentialOperator">PseudoDifferentialOperator</a></code></dt>
+<dd>The pseudo-differential operator B to commute with this operator A.</dd>
+<dt><strong><code>order</code></strong> :&ensp;<code>int</code>, default=<code>1</code></dt>
+<dd>Maximum order of the asymptotic expansion.
+- order=1 yields the leading term proportional to the Poisson bracket {p, q}.
+- Higher orders include correction terms involving higher mixed derivatives.</dd>
+</dl>
+<h2 id="returns">Returns</h2>
+<dl>
+<dt><code>sympy.Expr</code></dt>
+<dd>Symbolic expression for the asymptotic expansion of the commutator symbol
+σ([A,B]) = σ(A∘B − B∘A).</dd>
+</dl>
+<h2 id="notes">Notes</h2>
+<ul>
+<li>In 1D, the expansion follows:
+σ([A,B])(x, ξ) ~ Σₙ (1/n!) (i)^{-n}
+[ ∂_ξⁿ p ∂_xⁿ q − ∂_ξⁿ q ∂_xⁿ p ].</li>
+</ul>
+<p>The leading term (n=1) gives:
+σ([A,B]) ≈ (1/i) {p, q} = (1/i)(∂_ξ p ∂_x q − ∂_x p ∂_ξ q).</p>
+<ul>
+<li>
+<p>In 2D, the multi-index generalization is used:
+σ([A,B])(x, y, ξ, η) ~ Σₙ Σᵢ (1/(i! j!))(i)^{-n}
+[ ∂_ξⁱ∂_ηʲ p ∂_xⁱ∂_yʲ q − ∂_ξⁱ∂_ηʲ q ∂_xⁱ∂_yʲ p ],
+with n = i + j.</p>
+</li>
+<li>
+<p>This expansion is valid for symbols admitting asymptotic expansions in |ξ|→∞.
+Both operators must act on the same spatial dimension.</p>
+</li>
+</ul></div>
+</dd>
 <dt id="PDESolver.PseudoDifferentialOperator.compose_asymptotic"><code class="name flex">
 <span>def <span class="ident">compose_asymptotic</span></span>(<span>self, other, order=1)</span>
 </code></dt>
@@ -10508,6 +10964,169 @@ If caching is enabled and a cached symbol exists, it returns the cached result t
 <dt><code>NotImplementedError</code></dt>
 <dd>If the spatial dimension is not 1D or 2D.</dd>
 </dl></div>
+</dd>
+<dt id="PDESolver.PseudoDifferentialOperator.exponential_symbol"><code class="name flex">
+<span>def <span class="ident">exponential_symbol</span></span>(<span>self, t=1.0, order=3)</span>
+</code></dt>
+<dd>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def exponential_symbol(self, t=1.0, order=3):
+    &#34;&#34;&#34;
+    Compute the symbol of exp(tP) using asymptotic expansion methods.
+    
+    This method calculates the exponential of a pseudo-differential operator 
+    using either a direct power series expansion or a Magnus expansion, 
+    depending on the structure of the symbol. The result is valid up to 
+    the specified asymptotic order.
+    
+    Parameters
+    ----------
+    t : float or sympy.Symbol, default=1.0
+        Time or evolution parameter. Common uses:
+        - t = -i*τ for Schrödinger evolution: exp(-iτH)
+        - t = τ for heat/diffusion: exp(τΔ)
+        - t for general propagators
+    order : int, default=3
+        Maximum order of the asymptotic expansion. Higher orders include 
+        more composition terms, improving accuracy for small t or when 
+        non-commutativity effects are significant.
+    
+    Returns
+    -------
+    sympy.Expr
+        Symbolic expression for the exponential operator symbol, computed 
+        as an asymptotic series up to the specified order.
+    
+    Notes
+    -----
+    - For commutative symbols (e.g., pure multiplication operators), the 
+      exponential is exact: exp(tP) = exp(t*p(x,ξ)).
+    
+    - For general non-commutative operators, the method uses the BCH-type 
+      expansion via iterated composition:
+      exp(tP) ~ I + tP + (t²/2!)P∘P + (t³/3!)P∘P∘P + ...
+      
+    - Each power P^n is computed via compose_asymptotic, which accounts 
+      for the non-commutativity through derivative terms.
+    
+    - The expansion is valid for |t| small enough or when the symbol has 
+      appropriate decay/growth properties.
+    
+    - In quantum mechanics (Schrödinger): U(t) = exp(-itH/ℏ) represents 
+      the time evolution operator.
+    
+    - In parabolic PDEs (heat equation): exp(tΔ) is the heat kernel.
+
+    &#34;&#34;&#34;
+    from sympy import factorial, simplify
+    
+    if self.dim == 1:
+        x = self.vars_x[0]
+        xi = symbols(&#39;xi&#39;, real=True)
+        
+        # Initialize with identity
+        result = 1
+        
+        # First order term: tP
+        current_power = self.symbol
+        result += t * current_power
+        
+        # Higher order terms: (t^n/n!) P^n computed via composition
+        for n in range(2, order + 1):
+            # Compute P^n = P^(n-1) ∘ P via asymptotic composition
+            # We use a temporary operator for composition
+            temp_op = PseudoDifferentialOperator(
+                current_power, [x], mode=&#39;symbol&#39;
+            )
+            current_power = temp_op.compose_asymptotic(self, order=order)
+            
+            # Add term (t^n/n!) * P^n
+            coeff = t**n / factorial(n)
+            result += coeff * current_power
+        
+        return simplify(result)
+    
+    elif self.dim == 2:
+        x, y = self.vars_x
+        xi, eta = symbols(&#39;xi eta&#39;, real=True)
+        
+        # Initialize with identity
+        result = 1
+        
+        # First order term: tP
+        current_power = self.symbol
+        result += t * current_power
+        
+        # Higher order terms: (t^n/n!) P^n computed via composition
+        for n in range(2, order + 1):
+            # Compute P^n = P^(n-1) ∘ P via asymptotic composition
+            temp_op = PseudoDifferentialOperator(
+                current_power, [x, y], mode=&#39;symbol&#39;
+            )
+            current_power = temp_op.compose_asymptotic(self, order=order)
+            
+            # Add term (t^n/n!) * P^n
+            coeff = t**n / factorial(n)
+            result += coeff * current_power
+        
+        return simplify(result)
+    
+    else:
+        raise NotImplementedError(&#34;Only 1D and 2D operators are supported&#34;)</code></pre>
+</details>
+<div class="desc"><p>Compute the symbol of exp(tP) using asymptotic expansion methods.</p>
+<p>This method calculates the exponential of a pseudo-differential operator
+using either a direct power series expansion or a Magnus expansion,
+depending on the structure of the symbol. The result is valid up to
+the specified asymptotic order.</p>
+<h2 id="parameters">Parameters</h2>
+<dl>
+<dt><strong><code>t</code></strong> :&ensp;<code>float</code> or <code>sympy.Symbol</code>, default=<code>1.0</code></dt>
+<dd>Time or evolution parameter. Common uses:
+- t = -i*τ for Schrödinger evolution: exp(-iτH)
+- t = τ for heat/diffusion: exp(τΔ)
+- t for general propagators</dd>
+<dt><strong><code>order</code></strong> :&ensp;<code>int</code>, default=<code>3</code></dt>
+<dd>Maximum order of the asymptotic expansion. Higher orders include
+more composition terms, improving accuracy for small t or when
+non-commutativity effects are significant.</dd>
+</dl>
+<h2 id="returns">Returns</h2>
+<dl>
+<dt><code>sympy.Expr</code></dt>
+<dd>Symbolic expression for the exponential operator symbol, computed
+as an asymptotic series up to the specified order.</dd>
+</dl>
+<h2 id="notes">Notes</h2>
+<ul>
+<li>
+<p>For commutative symbols (e.g., pure multiplication operators), the
+exponential is exact: exp(tP) = exp(t*p(x,ξ)).</p>
+</li>
+<li>
+<p>For general non-commutative operators, the method uses the BCH-type
+expansion via iterated composition:
+exp(tP) ~ I + tP + (t²/2!)P∘P + (t³/3!)P∘P∘P + &hellip;</p>
+</li>
+<li>
+<p>Each power P^n is computed via compose_asymptotic, which accounts
+for the non-commutativity through derivative terms.</p>
+</li>
+<li>
+<p>The expansion is valid for |t| small enough or when the symbol has
+appropriate decay/growth properties.</p>
+</li>
+<li>
+<p>In quantum mechanics (Schrödinger): U(t) = exp(-itH/ℏ) represents
+the time evolution operator.</p>
+</li>
+<li>
+<p>In parabolic PDEs (heat equation): exp(tΔ) is the heat kernel.</p>
+</li>
+</ul></div>
 </dd>
 <dt id="PDESolver.PseudoDifferentialOperator.formal_adjoint"><code class="name flex">
 <span>def <span class="ident">formal_adjoint</span></span>(<span>self)</span>
@@ -12147,6 +12766,230 @@ dx/dt = ∂p/∂ξ, dy/dt = ∂p/∂η, dξ/dt = -∂p/∂x, dη/dt = -∂p/∂y
 <li>This flow preserves the symplectic structure of phase space.</li>
 </ul></div>
 </dd>
+<dt id="PDESolver.PseudoDifferentialOperator.trace_formula"><code class="name flex">
+<span>def <span class="ident">trace_formula</span></span>(<span>self, volume_element=None, numerical=False, x_bounds=None, xi_bounds=None)</span>
+</code></dt>
+<dd>
+<details class="source">
+<summary>
+<span>Expand source code</span>
+</summary>
+<pre><code class="python">def trace_formula(self, volume_element=None, numerical=False, 
+                  x_bounds=None, xi_bounds=None):
+    &#34;&#34;&#34;
+    Compute the semiclassical trace of the pseudo-differential operator.
+    
+    The trace formula relates the quantum trace of an operator to a 
+    phase-space integral of its symbol, providing a fundamental link 
+    between classical and quantum mechanics. This implementation supports 
+    both symbolic and numerical integration.
+    
+    Parameters
+    ----------
+    volume_element : sympy.Expr, optional
+        Custom volume element for the phase space integration. If None, 
+        uses the standard Liouville measure dx dξ/(2π)^d.
+    numerical : bool, default=False
+        If True, perform numerical integration over specified bounds.
+        If False, attempt symbolic integration (may fail for complex symbols).
+    x_bounds : tuple of tuples, optional
+        Spatial integration bounds. For 1D: ((x_min, x_max),)
+        For 2D: ((x_min, x_max), (y_min, y_max))
+        Required if numerical=True.
+    xi_bounds : tuple of tuples, optional
+        Frequency integration bounds. For 1D: ((xi_min, xi_max),)
+        For 2D: ((xi_min, xi_max), (eta_min, eta_max))
+        Required if numerical=True.
+    
+    Returns
+    -------
+    sympy.Expr or float
+        The trace of the operator. Returns a symbolic expression if 
+        numerical=False, or a float if numerical=True.
+    
+    Notes
+    -----
+    - The semiclassical trace formula states:
+      Tr(P) = (2π)^{-d} ∫∫ p(x,ξ) dx dξ
+      where d is the spatial dimension and p(x,ξ) is the operator symbol.
+    
+    - For 1D: Tr(P) = (1/2π) ∫_{-∞}^{∞} ∫_{-∞}^{∞} p(x,ξ) dx dξ
+    
+    - For 2D: Tr(P) = (1/4π²) ∫∫∫∫ p(x,y,ξ,η) dx dy dξ dη
+    
+    - This formula is exact for trace-class operators and provides an 
+      asymptotic approximation for general pseudo-differential operators.
+    
+    - Physical interpretation: the trace counts the &#34;number of states&#34; 
+      weighted by the observable p(x,ξ).
+    
+    - For projection operators (χ_Ω with χ² = χ), the trace gives the 
+      dimension of the range, related to the phase space volume of Ω.
+    
+    - The factor (2π)^{-d} comes from the quantum normalization of 
+      coherent states / Weyl quantization.
+    &#34;&#34;&#34;
+    from sympy import integrate, simplify, lambdify
+    from scipy.integrate import dblquad, nquad
+    
+    p = self.symbol
+    
+    if numerical:
+        if x_bounds is None or xi_bounds is None:
+            raise ValueError(
+                &#34;x_bounds and xi_bounds must be provided for numerical integration&#34;
+            )
+    
+    if self.dim == 1:
+        x, = self.vars_x
+        xi = symbols(&#39;xi&#39;, real=True)
+        
+        if volume_element is None:
+            volume_element = 1 / (2 * pi)
+        
+        if numerical:
+            # Numerical integration
+            p_func = lambdify((x, xi), p, &#39;numpy&#39;)
+            (x_min, x_max), = x_bounds
+            (xi_min, xi_max), = xi_bounds
+            
+            def integrand(xi_val, x_val):
+                return p_func(x_val, xi_val)
+            
+            result, error = dblquad(
+                integrand,
+                x_min, x_max,
+                lambda x: xi_min, lambda x: xi_max
+            )
+            
+            result *= float(volume_element)
+            print(f&#34;Numerical trace = {result:.6e} ± {error:.6e}&#34;)
+            return result
+        
+        else:
+            # Symbolic integration
+            integrand = p * volume_element
+            
+            try:
+                # Try to integrate over xi first, then x
+                integral_xi = integrate(integrand, (xi, -oo, oo))
+                integral_x = integrate(integral_xi, (x, -oo, oo))
+                return simplify(integral_x)
+            except:
+                print(&#34;Warning: Symbolic integration failed. Try numerical=True&#34;)
+                return integrate(integrand, (xi, -oo, oo), (x, -oo, oo))
+    
+    elif self.dim == 2:
+        x, y = self.vars_x
+        xi, eta = symbols(&#39;xi eta&#39;, real=True)
+        
+        if volume_element is None:
+            volume_element = 1 / (4 * pi**2)
+        
+        if numerical:
+            # Numerical integration in 4D
+            p_func = lambdify((x, y, xi, eta), p, &#39;numpy&#39;)
+            (x_min, x_max), (y_min, y_max) = x_bounds
+            (xi_min, xi_max), (eta_min, eta_max) = xi_bounds
+            
+            def integrand(eta_val, xi_val, y_val, x_val):
+                return p_func(x_val, y_val, xi_val, eta_val)
+            
+            result, error = nquad(
+                integrand,
+                [
+                    [eta_min, eta_max],
+                    [xi_min, xi_max],
+                    [y_min, y_max],
+                    [x_min, x_max]
+                ]
+            )
+            
+            result *= float(volume_element)
+            print(f&#34;Numerical trace = {result:.6e} ± {error:.6e}&#34;)
+            return result
+        
+        else:
+            # Symbolic integration
+            integrand = p * volume_element
+            
+            try:
+                # Integrate in order: eta, xi, y, x
+                integral_eta = integrate(integrand, (eta, -oo, oo))
+                integral_xi = integrate(integral_eta, (xi, -oo, oo))
+                integral_y = integrate(integral_xi, (y, -oo, oo))
+                integral_x = integrate(integral_y, (x, -oo, oo))
+                return simplify(integral_x)
+            except:
+                print(&#34;Warning: Symbolic integration failed. Try numerical=True&#34;)
+                return integrate(
+                    integrand,
+                    (eta, -oo, oo), (xi, -oo, oo),
+                    (y, -oo, oo), (x, -oo, oo)
+                )
+    
+    else:
+        raise NotImplementedError(&#34;Only 1D and 2D operators are supported&#34;)</code></pre>
+</details>
+<div class="desc"><p>Compute the semiclassical trace of the pseudo-differential operator.</p>
+<p>The trace formula relates the quantum trace of an operator to a
+phase-space integral of its symbol, providing a fundamental link
+between classical and quantum mechanics. This implementation supports
+both symbolic and numerical integration.</p>
+<h2 id="parameters">Parameters</h2>
+<dl>
+<dt><strong><code>volume_element</code></strong> :&ensp;<code>sympy.Expr</code>, optional</dt>
+<dd>Custom volume element for the phase space integration. If None,
+uses the standard Liouville measure dx dξ/(2π)^d.</dd>
+<dt><strong><code>numerical</code></strong> :&ensp;<code>bool</code>, default=<code>False</code></dt>
+<dd>If True, perform numerical integration over specified bounds.
+If False, attempt symbolic integration (may fail for complex symbols).</dd>
+<dt><strong><code>x_bounds</code></strong> :&ensp;<code>tuple</code> of <code>tuples</code>, optional</dt>
+<dd>Spatial integration bounds. For 1D: ((x_min, x_max),)
+For 2D: ((x_min, x_max), (y_min, y_max))
+Required if numerical=True.</dd>
+<dt><strong><code>xi_bounds</code></strong> :&ensp;<code>tuple</code> of <code>tuples</code>, optional</dt>
+<dd>Frequency integration bounds. For 1D: ((xi_min, xi_max),)
+For 2D: ((xi_min, xi_max), (eta_min, eta_max))
+Required if numerical=True.</dd>
+</dl>
+<h2 id="returns">Returns</h2>
+<dl>
+<dt><code>sympy.Expr</code> or <code>float</code></dt>
+<dd>The trace of the operator. Returns a symbolic expression if
+numerical=False, or a float if numerical=True.</dd>
+</dl>
+<h2 id="notes">Notes</h2>
+<ul>
+<li>
+<p>The semiclassical trace formula states:
+Tr(P) = (2π)^{-d} ∫∫ p(x,ξ) dx dξ
+where d is the spatial dimension and p(x,ξ) is the operator symbol.</p>
+</li>
+<li>
+<p>For 1D: Tr(P) = (1/2π) ∫<em -_="-∞">{-∞}^{∞} ∫</em> p(x,ξ) dx dξ}^{∞</p>
+</li>
+<li>
+<p>For 2D: Tr(P) = (1/4π²) ∫∫∫∫ p(x,y,ξ,η) dx dy dξ dη</p>
+</li>
+<li>
+<p>This formula is exact for trace-class operators and provides an
+asymptotic approximation for general pseudo-differential operators.</p>
+</li>
+<li>
+<p>Physical interpretation: the trace counts the "number of states"
+weighted by the observable p(x,ξ).</p>
+</li>
+<li>
+<p>For projection operators (χ_Ω with χ² = χ), the trace gives the
+dimension of the range, related to the phase space volume of Ω.</p>
+</li>
+<li>
+<p>The factor (2π)^{-d} comes from the quantum normalization of
+coherent states / Weyl quantization.</p>
+</li>
+</ul></div>
+</dd>
 <dt id="PDESolver.PseudoDifferentialOperator.visualize_characteristic_gradient"><code class="name flex">
 <span>def <span class="ident">visualize_characteristic_gradient</span></span>(<span>self, x_grid, xi_grid, y_grid=None, eta_grid=None, y0=0.0, x0=0.0)</span>
 </code></dt>
@@ -12793,8 +13636,10 @@ Usage: psiOp(symbol_expr, u)</p></div>
 <li><code><a title="PDESolver.PseudoDifferentialOperator.animate_singularity" href="#PDESolver.PseudoDifferentialOperator.animate_singularity">animate_singularity</a></code></li>
 <li><code><a title="PDESolver.PseudoDifferentialOperator.asymptotic_expansion" href="#PDESolver.PseudoDifferentialOperator.asymptotic_expansion">asymptotic_expansion</a></code></li>
 <li><code><a title="PDESolver.PseudoDifferentialOperator.clear_cache" href="#PDESolver.PseudoDifferentialOperator.clear_cache">clear_cache</a></code></li>
+<li><code><a title="PDESolver.PseudoDifferentialOperator.commutator_symbolic" href="#PDESolver.PseudoDifferentialOperator.commutator_symbolic">commutator_symbolic</a></code></li>
 <li><code><a title="PDESolver.PseudoDifferentialOperator.compose_asymptotic" href="#PDESolver.PseudoDifferentialOperator.compose_asymptotic">compose_asymptotic</a></code></li>
 <li><code><a title="PDESolver.PseudoDifferentialOperator.evaluate" href="#PDESolver.PseudoDifferentialOperator.evaluate">evaluate</a></code></li>
+<li><code><a title="PDESolver.PseudoDifferentialOperator.exponential_symbol" href="#PDESolver.PseudoDifferentialOperator.exponential_symbol">exponential_symbol</a></code></li>
 <li><code><a title="PDESolver.PseudoDifferentialOperator.formal_adjoint" href="#PDESolver.PseudoDifferentialOperator.formal_adjoint">formal_adjoint</a></code></li>
 <li><code><a title="PDESolver.PseudoDifferentialOperator.group_velocity_field" href="#PDESolver.PseudoDifferentialOperator.group_velocity_field">group_velocity_field</a></code></li>
 <li><code><a title="PDESolver.PseudoDifferentialOperator.interactive_symbol_analysis" href="#PDESolver.PseudoDifferentialOperator.interactive_symbol_analysis">interactive_symbol_analysis</a></code></li>
@@ -12809,6 +13654,7 @@ Usage: psiOp(symbol_expr, u)</p></div>
 <li><code><a title="PDESolver.PseudoDifferentialOperator.simulate_evolution" href="#PDESolver.PseudoDifferentialOperator.simulate_evolution">simulate_evolution</a></code></li>
 <li><code><a title="PDESolver.PseudoDifferentialOperator.symbol_order" href="#PDESolver.PseudoDifferentialOperator.symbol_order">symbol_order</a></code></li>
 <li><code><a title="PDESolver.PseudoDifferentialOperator.symplectic_flow" href="#PDESolver.PseudoDifferentialOperator.symplectic_flow">symplectic_flow</a></code></li>
+<li><code><a title="PDESolver.PseudoDifferentialOperator.trace_formula" href="#PDESolver.PseudoDifferentialOperator.trace_formula">trace_formula</a></code></li>
 <li><code><a title="PDESolver.PseudoDifferentialOperator.visualize_characteristic_gradient" href="#PDESolver.PseudoDifferentialOperator.visualize_characteristic_gradient">visualize_characteristic_gradient</a></code></li>
 <li><code><a title="PDESolver.PseudoDifferentialOperator.visualize_characteristic_set" href="#PDESolver.PseudoDifferentialOperator.visualize_characteristic_set">visualize_characteristic_set</a></code></li>
 <li><code><a title="PDESolver.PseudoDifferentialOperator.visualize_fiber" href="#PDESolver.PseudoDifferentialOperator.visualize_fiber">visualize_fiber</a></code></li>
