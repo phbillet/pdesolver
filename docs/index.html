@@ -68,7 +68,7 @@ making it suitable for both research and educational applications.</p>
 <li><strong>Boundary Conditions</strong>:
 <ul>
 <li>Periodic (via FFT)</li>
-<li>Dirichlet (via pseudo-differential operator inversion)
+<li>Dirichlet (via pseudo-differential operator)
 </li>
 </ul>
 </li>
@@ -441,13 +441,13 @@ Usage: Op(symbol_expr, u)</p></div>
         else:
             raise ValueError(&#34;Only 1D and 2D problems are supported.&#34;)
 
-        
         if self.dim == 1:
             self.fft = partial(fft, workers=FFT_WORKERS)
             self.ifft = partial(ifft, workers=FFT_WORKERS)
         else:
             self.fft = partial(fft2, workers=FFT_WORKERS)
             self.ifft = partial(ifft2, workers=FFT_WORKERS)
+            
         # Parse the equation
         self.linear_terms = {}
         self.nonlinear_terms = []

@@ -34,7 +34,7 @@ Key Features
     - Supports symbolic inversion, adjoint computation, and asymptotic expansions  
 - **Boundary Conditions**:  
     - Periodic (via FFT)
-    - Dirichlet (via pseudo-differential operator inversion)  
+    - Dirichlet (via pseudo-differential operator)  
 - **Interactive Analysis**:  
     - Explore symbol properties (`|p(x, ξ)|`, group velocity)  
     - Visualize Hamiltonian flows and characteristic sets  
@@ -2357,13 +2357,13 @@ class PDESolver:
         else:
             raise ValueError("Only 1D and 2D problems are supported.")
 
-        
         if self.dim == 1:
             self.fft = partial(fft, workers=FFT_WORKERS)
             self.ifft = partial(ifft, workers=FFT_WORKERS)
         else:
             self.fft = partial(fft2, workers=FFT_WORKERS)
             self.ifft = partial(ifft2, workers=FFT_WORKERS)
+            
         # Parse the equation
         self.linear_terms = {}
         self.nonlinear_terms = []
