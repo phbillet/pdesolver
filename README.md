@@ -115,14 +115,15 @@ HTML(ani.to_jshtml())
 
 | Notebook                                                                                                   | Description                                                                                         |
 |------------------------------------------------------------------------------------------------------------|-----------------------------------------------------------------------------------------------------|
-| [`PDE_symbolic_tester`](https://phbillet.github.io/pdesolver/PDE_symbolic_tester.html)                     | Verifies symbolic parsing & solutions                                                               |
 | [`psiOp_tester`](https://phbillet.github.io/pdesolver/psiOp_tester.html)                                   | Tests `psiOp` visualization & symbolic analysis                                                     |
 | [`psiOp_quantization_evolution`](https://phbillet.github.io/pdesolver/psiOp_quantization_evolution.html)   | Tests `psiOp` quantization & evolution simulation                                                   |
+| [`psiOp_examples`](https://phbillet.github.io/pdesolver/psiOp_examples.html)                               | `psiOp` examples: symbol approximation, Heisenberg group and algebra, Geodesic flow, Ergodic theory |
 | [`PDESolver_tester_1D_periodic`](https://phbillet.github.io/pdesolver/PDESolver_tester_periodic_1D.html)   | 1D periodic : stationary, transport, heat, wave, Schrödinger, fractional Laplacian, Klein-Gordon... |
 | [`PDESolver_tester_1D_Dirichlet`](https://phbillet.github.io/pdesolver/PDESolver_tester_Dirichlet_1D.html) | 1D Dirichlet: stationary, transport, heat, wave, Schrödinger, Airy, Hermite, Legendre...            |
 | [`PDESolver_tester_2D_periodic`](https://phbillet.github.io/pdesolver/PDESolver_tester_periodic_2D.html)   | 2D periodic : stationary, transport, heat, wave, Schrödinger, fractional Laplacian, Klein-Gordon... |
 | [`PDESolver_tester_2D_Dirichlet`](https://phbillet.github.io/pdesolver/PDESolver_tester_Dirichlet_2D.html) | 2D Dirichlet: stationary, diffusion (just few examples due to memory consumption)                   |
-| [`PDESolver_examples`](https://phbillet.github.io/pdesolver/PDESolver_examples.html)                       | 1D periodic/Dirichlet: Ginzburg-Landau, Sine-Gordon, non-linear Schrödinger, Fisher-KPP equation...  |
+| [`PDESolver_examples`](https://phbillet.github.io/pdesolver/PDESolver_examples.html)                       | 1D periodic/Dirichlet: Ginzburg-Landau, Sine-Gordon, non-linear Schrödinger, Fisher-KPP equation... |
+| [`PDE_symbolic_tester`](https://phbillet.github.io/pdesolver/PDE_symbolic_tester.html)                     | Verifies symbolic parsing & solutions                                                               |
 
 
 Use them to explore features and validate new equations.

@@ -8458,61 +8458,111 @@ pseudo-differential operator in symbolic form.</dd>
                 print(f&#34;Warning: 2D expansion failed: {e}&#34;)
                 return p  
             
-    def compose_asymptotic(self, other, order=1):
+    def compose_asymptotic(self, other, order=1, mode=&#39;kn&#39;, sign_convention=None):
         &#34;&#34;&#34;
-        Compose this pseudo-differential operator with another using formal asymptotic expansion.
-
-        This method computes the composition symbol via an asymptotic expansion in powers of 
-        derivatives, following the symbolic calculus of pseudo-differential operators. The 
-        composition is performed up to the specified order and respects the dimensionality 
-        (1D or 2D) of the operators.
-
+        Compose two pseudo-differential operators using an asymptotic expansion
+        in the chosen quantization scheme (Kohn–Nirenberg or Weyl).
+    
         Parameters
         ----------
         other : PseudoDifferentialOperator
-            The pseudo-differential operator to compose with this one.
+            The operator to compose with this one.
         order : int, default=1
-            Maximum order of the asymptotic expansion. Higher values include more terms in the 
-            symbolic composition, increasing accuracy at the cost of complexity.
-
+            Maximum order of the asymptotic expansion.
+        mode : {&#39;kn&#39;, &#39;weyl&#39;}, default=&#39;kn&#39;
+            Quantization mode:
+            - &#39;kn&#39; : Kohn–Nirenberg quantization (left-quantized)
+            - &#39;weyl&#39; : Weyl symmetric quantization
+        sign_convention : {&#39;standard&#39;, &#39;inverse&#39;}, optional
+            Controls the phase factor convention for the KN case:
+            - &#39;standard&#39; → (i)^(-n), gives [x, ξ] = +i (physics convention)
+            - &#39;inverse&#39; → (i)^(+n), gives [x, ξ] = -i (mathematical adjoint convention)
+            If None, defaults to &#39;standard&#39;.
+    
         Returns
         -------
         sympy.Expr
-            Symbolic expression representing the asymptotic expansion of the composed operator.
-
+            Symbolic expression for the composed symbol up to the given order.
+    
         Notes
         -----
-        - In 1D, the composition uses the formula:
-          (p ∘ q)(x, ξ) ~ Σₙ (1/n!) ∂_ξⁿ p(x, ξ) ∂_xⁿ q(x, ξ) (i)^{-n}
-        - In 2D, the multi-index generalization is used:
-          (p ∘ q)(x, y, ξ, η) ~ Σₙ Σᵢ (1/(i! j!)) ∂_ξⁱ∂_ηʲ p ∂_xⁱ∂_yʲ q (i)^{-n}, where n = i + j.
-        - This expansion is valid for symbols admitting an asymptotic series representation.
-        - Operators must be defined on the same spatial domain (same dimension).
+        - In 1D (Kohn–Nirenberg):
+            (p ∘ q)(x, ξ) ~ Σₙ (1/n!) (i sgn)^n ∂_ξⁿ p(x, ξ) ∂_xⁿ q(x, ξ)
+        - In 1D (Weyl):
+            (p # q)(x, ξ) = exp[(i/2)(∂_ξ^p ∂_x^q - ∂_x^p ∂_ξ^q)] p(x, ξ) q(x, ξ)
+            truncated at given order.
+    
+        Examples
+        --------
+        X = a*x, Y = b*ξ
+        X_op.compose_asymptotic(Y_op, order=3, mode=&#39;weyl&#39;)
         &#34;&#34;&#34;
-
+    
+        from sympy import diff, factorial, simplify, symbols
+    
         assert self.dim == other.dim, &#34;Operator dimensions must match&#34;
         p, q = self.symbol, other.symbol
     
+        # Default sign convention
+        if sign_convention is None:
+            sign_convention = &#39;standard&#39;
+        sign = -1 if sign_convention == &#39;standard&#39; else +1
+    
+        # --- 1D case ---
         if self.dim == 1:
             x = self.vars_x[0]
             xi = symbols(&#39;xi&#39;, real=True)
             result = 0
-            for n in range(order + 1):
-                term = (1 / factorial(n)) * diff(p, xi, n) * diff(q, x, n) * (1j)**(-n)
-                result += term
     
+            if mode == &#39;kn&#39;:  # Kohn–Nirenberg
+                for n in range(order + 1):
+                    term = (1 / factorial(n)) * diff(p, xi, n) * diff(q, x, n) * (1j) ** (sign * n)
+                    result += term
+    
+            elif mode == &#39;weyl&#39;:  # Weyl symmetric composition
+                # Weyl star product: exp((i/2)(∂_ξ^p ∂_x^q - ∂_x^p ∂_ξ^q))
+                result = 0
+                for n in range(order + 1):
+                    for k in range(n + 1):
+                        # k derivatives acting as (∂_ξ^k p)(∂_x^(n−k) q)
+                        coeff = (1 / (factorial(k) * factorial(n - k))) * ((1j / 2) ** n) * ((-1) ** (n - k))
+                        term = coeff * diff(p, xi, k, x, n - k, evaluate=True) * diff(q, x, k, xi, n - k, evaluate=True)
+                        result += term
+    
+            else:
+                raise ValueError(&#34;mode must be either &#39;kn&#39; or &#39;weyl&#39;&#34;)
+    
+            return simplify(result)
+    
+        # --- 2D case ---
         elif self.dim == 2:
             x, y = self.vars_x
             xi, eta = symbols(&#39;xi eta&#39;, real=True)
             result = 0
-            for n in range(order + 1):
-                for i in range(n + 1):
-                    j = n - i
-                    term = (1 / (factorial(i) * factorial(j))) * \
-                           diff(p, xi, i, eta, j) * diff(q, x, i, y, j) * (1j)**(-n)
-                    result += term
     
-        return result
+            if mode == &#39;kn&#39;:
+                for n in range(order + 1):
+                    for i in range(n + 1):
+                        j = n - i
+                        term = (1 / (factorial(i) * factorial(j))) * \
+                               diff(p, xi, i, eta, j) * diff(q, x, i, y, j) * (1j) ** (sign * n)
+                        result += term
+    
+            elif mode == &#39;weyl&#39;:
+                for n in range(order + 1):
+                    for i in range(n + 1):
+                        j = n - i
+                        coeff = (1 / (factorial(i) * factorial(j))) * ((1j / 2) ** n) * ((-1) ** (n - i))
+                        term = coeff * diff(p, xi, i, eta, j, x, 0, y, 0) * diff(q, x, i, y, j, xi, 0, eta, 0)
+                        result += term
+            else:
+                raise ValueError(&#34;mode must be either &#39;kn&#39; or &#39;weyl&#39;&#34;)
+    
+            return simplify(result)
+    
+        else:
+            raise NotImplementedError(&#34;Only 1D and 2D cases are implemented&#34;)
+
 
     def commutator_symbolic(self, other, order=1):
         &#34;&#34;&#34;
@@ -8787,8 +8837,6 @@ pseudo-differential operator in symbolic form.</dd>
         - In parabolic PDEs (heat equation): exp(tΔ) is the heat kernel.
 
         &#34;&#34;&#34;
-        from sympy import factorial, simplify
-        
         if self.dim == 1:
             x = self.vars_x[0]
             xi = symbols(&#39;xi&#39;, real=True)
@@ -10804,96 +10852,152 @@ Both operators must act on the same spatial dimension.</p>
 </ul></div>
 </dd>
 <dt id="PDESolver.PseudoDifferentialOperator.compose_asymptotic"><code class="name flex">
-<span>def <span class="ident">compose_asymptotic</span></span>(<span>self, other, order=1)</span>
+<span>def <span class="ident">compose_asymptotic</span></span>(<span>self, other, order=1, mode='kn', sign_convention=None)</span>
 </code></dt>
 <dd>
 <details class="source">
 <summary>
 <span>Expand source code</span>
 </summary>
-<pre><code class="python">def compose_asymptotic(self, other, order=1):
+<pre><code class="python">def compose_asymptotic(self, other, order=1, mode=&#39;kn&#39;, sign_convention=None):
     &#34;&#34;&#34;
-    Compose this pseudo-differential operator with another using formal asymptotic expansion.
-
-    This method computes the composition symbol via an asymptotic expansion in powers of 
-    derivatives, following the symbolic calculus of pseudo-differential operators. The 
-    composition is performed up to the specified order and respects the dimensionality 
-    (1D or 2D) of the operators.
+    Compose two pseudo-differential operators using an asymptotic expansion
+    in the chosen quantization scheme (Kohn–Nirenberg or Weyl).
 
     Parameters
     ----------
     other : PseudoDifferentialOperator
-        The pseudo-differential operator to compose with this one.
+        The operator to compose with this one.
     order : int, default=1
-        Maximum order of the asymptotic expansion. Higher values include more terms in the 
-        symbolic composition, increasing accuracy at the cost of complexity.
+        Maximum order of the asymptotic expansion.
+    mode : {&#39;kn&#39;, &#39;weyl&#39;}, default=&#39;kn&#39;
+        Quantization mode:
+        - &#39;kn&#39; : Kohn–Nirenberg quantization (left-quantized)
+        - &#39;weyl&#39; : Weyl symmetric quantization
+    sign_convention : {&#39;standard&#39;, &#39;inverse&#39;}, optional
+        Controls the phase factor convention for the KN case:
+        - &#39;standard&#39; → (i)^(-n), gives [x, ξ] = +i (physics convention)
+        - &#39;inverse&#39; → (i)^(+n), gives [x, ξ] = -i (mathematical adjoint convention)
+        If None, defaults to &#39;standard&#39;.
 
     Returns
     -------
     sympy.Expr
-        Symbolic expression representing the asymptotic expansion of the composed operator.
+        Symbolic expression for the composed symbol up to the given order.
 
     Notes
     -----
-    - In 1D, the composition uses the formula:
-      (p ∘ q)(x, ξ) ~ Σₙ (1/n!) ∂_ξⁿ p(x, ξ) ∂_xⁿ q(x, ξ) (i)^{-n}
-    - In 2D, the multi-index generalization is used:
-      (p ∘ q)(x, y, ξ, η) ~ Σₙ Σᵢ (1/(i! j!)) ∂_ξⁱ∂_ηʲ p ∂_xⁱ∂_yʲ q (i)^{-n}, where n = i + j.
-    - This expansion is valid for symbols admitting an asymptotic series representation.
-    - Operators must be defined on the same spatial domain (same dimension).
+    - In 1D (Kohn–Nirenberg):
+        (p ∘ q)(x, ξ) ~ Σₙ (1/n!) (i sgn)^n ∂_ξⁿ p(x, ξ) ∂_xⁿ q(x, ξ)
+    - In 1D (Weyl):
+        (p # q)(x, ξ) = exp[(i/2)(∂_ξ^p ∂_x^q - ∂_x^p ∂_ξ^q)] p(x, ξ) q(x, ξ)
+        truncated at given order.
+
+    Examples
+    --------
+    X = a*x, Y = b*ξ
+    X_op.compose_asymptotic(Y_op, order=3, mode=&#39;weyl&#39;)
     &#34;&#34;&#34;
+
+    from sympy import diff, factorial, simplify, symbols
 
     assert self.dim == other.dim, &#34;Operator dimensions must match&#34;
     p, q = self.symbol, other.symbol
 
+    # Default sign convention
+    if sign_convention is None:
+        sign_convention = &#39;standard&#39;
+    sign = -1 if sign_convention == &#39;standard&#39; else +1
+
+    # --- 1D case ---
     if self.dim == 1:
         x = self.vars_x[0]
         xi = symbols(&#39;xi&#39;, real=True)
         result = 0
-        for n in range(order + 1):
-            term = (1 / factorial(n)) * diff(p, xi, n) * diff(q, x, n) * (1j)**(-n)
-            result += term
 
+        if mode == &#39;kn&#39;:  # Kohn–Nirenberg
+            for n in range(order + 1):
+                term = (1 / factorial(n)) * diff(p, xi, n) * diff(q, x, n) * (1j) ** (sign * n)
+                result += term
+
+        elif mode == &#39;weyl&#39;:  # Weyl symmetric composition
+            # Weyl star product: exp((i/2)(∂_ξ^p ∂_x^q - ∂_x^p ∂_ξ^q))
+            result = 0
+            for n in range(order + 1):
+                for k in range(n + 1):
+                    # k derivatives acting as (∂_ξ^k p)(∂_x^(n−k) q)
+                    coeff = (1 / (factorial(k) * factorial(n - k))) * ((1j / 2) ** n) * ((-1) ** (n - k))
+                    term = coeff * diff(p, xi, k, x, n - k, evaluate=True) * diff(q, x, k, xi, n - k, evaluate=True)
+                    result += term
+
+        else:
+            raise ValueError(&#34;mode must be either &#39;kn&#39; or &#39;weyl&#39;&#34;)
+
+        return simplify(result)
+
+    # --- 2D case ---
     elif self.dim == 2:
         x, y = self.vars_x
         xi, eta = symbols(&#39;xi eta&#39;, real=True)
         result = 0
-        for n in range(order + 1):
-            for i in range(n + 1):
-                j = n - i
-                term = (1 / (factorial(i) * factorial(j))) * \
-                       diff(p, xi, i, eta, j) * diff(q, x, i, y, j) * (1j)**(-n)
-                result += term
 
-    return result</code></pre>
+        if mode == &#39;kn&#39;:
+            for n in range(order + 1):
+                for i in range(n + 1):
+                    j = n - i
+                    term = (1 / (factorial(i) * factorial(j))) * \
+                           diff(p, xi, i, eta, j) * diff(q, x, i, y, j) * (1j) ** (sign * n)
+                    result += term
+
+        elif mode == &#39;weyl&#39;:
+            for n in range(order + 1):
+                for i in range(n + 1):
+                    j = n - i
+                    coeff = (1 / (factorial(i) * factorial(j))) * ((1j / 2) ** n) * ((-1) ** (n - i))
+                    term = coeff * diff(p, xi, i, eta, j, x, 0, y, 0) * diff(q, x, i, y, j, xi, 0, eta, 0)
+                    result += term
+        else:
+            raise ValueError(&#34;mode must be either &#39;kn&#39; or &#39;weyl&#39;&#34;)
+
+        return simplify(result)
+
+    else:
+        raise NotImplementedError(&#34;Only 1D and 2D cases are implemented&#34;)</code></pre>
 </details>
-<div class="desc"><p>Compose this pseudo-differential operator with another using formal asymptotic expansion.</p>
-<p>This method computes the composition symbol via an asymptotic expansion in powers of
-derivatives, following the symbolic calculus of pseudo-differential operators. The
-composition is performed up to the specified order and respects the dimensionality
-(1D or 2D) of the operators.</p>
+<div class="desc"><p>Compose two pseudo-differential operators using an asymptotic expansion
+in the chosen quantization scheme (Kohn–Nirenberg or Weyl).</p>
 <h2 id="parameters">Parameters</h2>
 <dl>
 <dt><strong><code>other</code></strong> :&ensp;<code><a title="PDESolver.PseudoDifferentialOperator" href="#PDESolver.PseudoDifferentialOperator">PseudoDifferentialOperator</a></code></dt>
-<dd>The pseudo-differential operator to compose with this one.</dd>
+<dd>The operator to compose with this one.</dd>
 <dt><strong><code>order</code></strong> :&ensp;<code>int</code>, default=<code>1</code></dt>
-<dd>Maximum order of the asymptotic expansion. Higher values include more terms in the
-symbolic composition, increasing accuracy at the cost of complexity.</dd>
+<dd>Maximum order of the asymptotic expansion.</dd>
+<dt><strong><code>mode</code></strong> :&ensp;<code>{'kn', 'weyl'}</code>, default=<code>'kn'</code></dt>
+<dd>Quantization mode:
+- 'kn' : Kohn–Nirenberg quantization (left-quantized)
+- 'weyl' : Weyl symmetric quantization</dd>
+<dt><strong><code>sign_convention</code></strong> :&ensp;<code>{'standard', 'inverse'}</code>, optional</dt>
+<dd>Controls the phase factor convention for the KN case:
+- 'standard' → (i)^(-n), gives [x, ξ] = +i (physics convention)
+- 'inverse' → (i)^(+n), gives [x, ξ] = -i (mathematical adjoint convention)
+If None, defaults to 'standard'.</dd>
 </dl>
 <h2 id="returns">Returns</h2>
 <dl>
 <dt><code>sympy.Expr</code></dt>
-<dd>Symbolic expression representing the asymptotic expansion of the composed operator.</dd>
+<dd>Symbolic expression for the composed symbol up to the given order.</dd>
 </dl>
 <h2 id="notes">Notes</h2>
 <ul>
-<li>In 1D, the composition uses the formula:
-(p ∘ q)(x, ξ) ~ Σₙ (1/n!) ∂_ξⁿ p(x, ξ) ∂_xⁿ q(x, ξ) (i)^{-n}</li>
-<li>In 2D, the multi-index generalization is used:
-(p ∘ q)(x, y, ξ, η) ~ Σₙ Σᵢ (1/(i! j!)) ∂_ξⁱ∂_ηʲ p ∂_xⁱ∂_yʲ q (i)^{-n}, where n = i + j.</li>
-<li>This expansion is valid for symbols admitting an asymptotic series representation.</li>
-<li>Operators must be defined on the same spatial domain (same dimension).</li>
-</ul></div>
+<li>In 1D (Kohn–Nirenberg):
+(p ∘ q)(x, ξ) ~ Σₙ (1/n!) (i sgn)^n ∂_ξⁿ p(x, ξ) ∂_xⁿ q(x, ξ)</li>
+<li>In 1D (Weyl):
+(p # q)(x, ξ) = exp[(i/2)(∂_ξ^p ∂_x^q - ∂_x^p ∂_ξ^q)] p(x, ξ) q(x, ξ)
+truncated at given order.</li>
+</ul>
+<h2 id="examples">Examples</h2>
+<p>X = a<em>x, Y = b</em>ξ
+X_op.compose_asymptotic(Y_op, order=3, mode='weyl')</p></div>
 </dd>
 <dt id="PDESolver.PseudoDifferentialOperator.evaluate"><code class="name flex">
 <span>def <span class="ident">evaluate</span></span>(<span>self, X, Y, KX, KY, cache=True)</span>
@@ -11021,8 +11125,6 @@ If caching is enabled and a cached symbol exists, it returns the cached result t
     - In parabolic PDEs (heat equation): exp(tΔ) is the heat kernel.
 
     &#34;&#34;&#34;
-    from sympy import factorial, simplify
-    
     if self.dim == 1:
         x = self.vars_x[0]
         xi = symbols(&#39;xi&#39;, real=True)

@@ -7640,10 +7640,6 @@ Symbol terms: []
 Pseudo terms: [(1, xi**2 + 1)]
 Source terms: [-sin(x)]
 ⚠️  Pseudo‑differential operator detected: all other linear terms have been rejected.
-
-symbol = 
- 2    
-ξ  + 1
 ⚠️ For psiOp, use interactive_symbol_analysis.
 
 *******************************
@@ -7651,10 +7647,6 @@ symbol =
 *******************************
 
 boundary condition:  periodic
-
-symbol = 
- 2    
-ξ  + 1
 ✅ Elliptic pseudo-differential symbol: inversion allowed.
 Right inverse asymptotic symbol:
   1   
@@ -7768,21 +7760,19 @@ Symbol terms: []
 Pseudo terms: [(1, x**2 + xi**2 + 1)]
 Source terms: [-(3 - 3*x**2)*exp(-x**2)]
 ⚠️  Pseudo‑differential operator detected: all other linear terms have been rejected.
-
-symbol = 
- 2    2    
-x  + ξ  + 1
-⚠️ For psiOp, use interactive_symbol_analysis.
+</pre>
+</div>
+</div>
+<div class="jp-OutputArea-child">
+<div class="jp-OutputPrompt jp-OutputArea-prompt"></div>
+<div class="jp-RenderedText jp-OutputArea-output" data-mime-type="text/plain" tabindex="0">
+<pre>⚠️ For psiOp, use interactive_symbol_analysis.
 
 *******************************
 * Solving the stationnary PDE *
 *******************************
 
 boundary condition:  periodic
-
-symbol = 
- 2    2    
-x  + ξ  + 1
 ✅ Elliptic pseudo-differential symbol: inversion allowed.
 Right inverse asymptotic symbol:
     4.0⋅ⅈ⋅x⋅ξ           1     
@@ -8194,11 +8184,6 @@ Raw characteristic equation:
 Temporal order from dispersion relation: 1
 self.pseudo_terms =  [(-1, I*xi - 1 - I/(xi + 0.001))]
 ✅ Time derivative coefficient detected: 1
-
-symbol = 
-              ⅈ    
-ⅈ⋅ξ - 1 - ─────────
-          ξ + 0.001
 </pre>
 </div>
 </div>
@@ -8625,12 +8610,6 @@ Raw characteristic equation:
 Temporal order from dispersion relation: 1
 self.pseudo_terms =  [(1, 2.0/(xi**2 + 1))]
 ✅ Time derivative coefficient detected: 1
-
-symbol = 
- 2.0  
-──────
- 2    
-ξ  + 1
 ⚠️ For psiOp, use interactive_symbol_analysis.
 
 *******************
@@ -8858,9 +8837,9 @@ CFL condition violated: dt = 0.0025, max allowed dt = 0.00024285117048934224
 <div class="jp-OutputArea-child">
 <div class="jp-OutputPrompt jp-OutputArea-prompt"></div>
 <div class="jp-RenderedText jp-OutputArea-output" data-mime-type="application/vnd.jupyter.stderr" tabindex="0">
-<pre>/home/fifi/pdesolver_prod/PDESolver.py:4297: RuntimeWarning: invalid value encountered in divide
+<pre>/home/fifi/pdesolver_prod/PDESolver.py:4735: RuntimeWarning: invalid value encountered in divide
   return np.where(np.abs(z) &gt; 1e-12, (np.exp(z) - 1) / z, 1.0)
-/home/fifi/pdesolver_prod/PDESolver.py:4300: RuntimeWarning: invalid value encountered in divide
+/home/fifi/pdesolver_prod/PDESolver.py:4738: RuntimeWarning: invalid value encountered in divide
   return np.where(np.abs(z) &gt; 1e-12, (np.exp(z) - 1 - z) / z**2, 0.5)
 </pre>
 </div>
@@ -9048,7 +9027,13 @@ Source terms: []
 * Linear operator computation *
 *******************************
 
-
+</pre>
+</div>
+</div>
+<div class="jp-OutputArea-child">
+<div class="jp-OutputPrompt jp-OutputArea-prompt"></div>
+<div class="jp-RenderedText jp-OutputArea-output" data-mime-type="text/plain" tabindex="0">
+<pre>
 Characteristic equation before symbol treatment:
 ⅈ⋅(1.0⋅kx - ω)
 
@@ -9294,10 +9279,6 @@ Raw characteristic equation:
 Temporal order from dispersion relation: 1
 self.pseudo_terms =  [(1, 1.0*I*xi + Abs(xi)**1.3)]
 ✅ Time derivative coefficient detected: 1
-
-symbol = 
-             1.3
-1.0⋅ⅈ⋅ξ + │ξ│   
 </pre>
 </div>
 </div>
@@ -9310,7 +9291,13 @@ symbol =
 * Solving the PDE *
 *******************
 
-Closest available time to t_eval=0.0: 0.0
+</pre>
+</div>
+</div>
+<div class="jp-OutputArea-child">
+<div class="jp-OutputPrompt jp-OutputArea-prompt"></div>
+<div class="jp-RenderedText jp-OutputArea-output" data-mime-type="text/plain" tabindex="0">
+<pre>Closest available time to t_eval=0.0: 0.0
 Test error t = 0.0: 1.065e-04
 </pre>
 </div>
@@ -9715,13 +9702,7 @@ Source terms: []
 * Linear operator computation *
 *******************************
 
-</pre>
-</div>
-</div>
-<div class="jp-OutputArea-child">
-<div class="jp-OutputPrompt jp-OutputArea-prompt"></div>
-<div class="jp-RenderedText jp-OutputArea-output" data-mime-type="text/plain" tabindex="0">
-<pre>
+
 Characteristic equation before symbol treatment:
   2      
 kx  - ⅈ⋅ω
@@ -10041,36 +10022,36 @@ input[type=range].anim-slider {
 }
 </style>
 <div class="animation">
-<img alt="No description has been provided for this image" id="_anim_img7bab230dce944c55a04722a65da50971"/>
+<img alt="No description has been provided for this image" id="_anim_imgec93958c03514b12915a60e01968a4d3"/>
 <div class="anim-controls">
-<input class="anim-slider" id="_anim_slider7bab230dce944c55a04722a65da50971" max="1" min="0" name="points" oninput="anim7bab230dce944c55a04722a65da50971.set_frame(parseInt(this.value));" step="1" type="range" value="0"/>
+<input class="anim-slider" id="_anim_sliderec93958c03514b12915a60e01968a4d3" max="1" min="0" name="points" oninput="animec93958c03514b12915a60e01968a4d3.set_frame(parseInt(this.value));" step="1" type="range" value="0"/>
 <div class="anim-buttons">
-<button aria-label="Decrease speed" onclick="anim7bab230dce944c55a04722a65da50971.slower()" title="Decrease speed">
+<button aria-label="Decrease speed" onclick="animec93958c03514b12915a60e01968a4d3.slower()" title="Decrease speed">
 <i class="fa fa-minus"></i></button>
-<button aria-label="First frame" onclick="anim7bab230dce944c55a04722a65da50971.first_frame()" title="First frame">
+<button aria-label="First frame" onclick="animec93958c03514b12915a60e01968a4d3.first_frame()" title="First frame">
 <i class="fa fa-fast-backward"></i></button>
-<button aria-label="Previous frame" onclick="anim7bab230dce944c55a04722a65da50971.previous_frame()" title="Previous frame">
+<button aria-label="Previous frame" onclick="animec93958c03514b12915a60e01968a4d3.previous_frame()" title="Previous frame">
 <i class="fa fa-step-backward"></i></button>
-<button aria-label="Play backwards" onclick="anim7bab230dce944c55a04722a65da50971.reverse_animation()" title="Play backwards">
+<button aria-label="Play backwards" onclick="animec93958c03514b12915a60e01968a4d3.reverse_animation()" title="Play backwards">
 <i class="fa fa-play fa-flip-horizontal"></i></button>
-<button aria-label="Pause" onclick="anim7bab230dce944c55a04722a65da50971.pause_animation()" title="Pause">
+<button aria-label="Pause" onclick="animec93958c03514b12915a60e01968a4d3.pause_animation()" title="Pause">
 <i class="fa fa-pause"></i></button>
-<button aria-label="Play" onclick="anim7bab230dce944c55a04722a65da50971.play_animation()" title="Play">
+<button aria-label="Play" onclick="animec93958c03514b12915a60e01968a4d3.play_animation()" title="Play">
 <i class="fa fa-play"></i></button>
-<button aria-label="Next frame" onclick="anim7bab230dce944c55a04722a65da50971.next_frame()" title="Next frame">
+<button aria-label="Next frame" onclick="animec93958c03514b12915a60e01968a4d3.next_frame()" title="Next frame">
 <i class="fa fa-step-forward"></i></button>
-<button aria-label="Last frame" onclick="anim7bab230dce944c55a04722a65da50971.last_frame()" title="Last frame">
+<button aria-label="Last frame" onclick="animec93958c03514b12915a60e01968a4d3.last_frame()" title="Last frame">
 <i class="fa fa-fast-forward"></i></button>
-<button aria-label="Increase speed" onclick="anim7bab230dce944c55a04722a65da50971.faster()" title="Increase speed">
+<button aria-label="Increase speed" onclick="animec93958c03514b12915a60e01968a4d3.faster()" title="Increase speed">
 <i class="fa fa-plus"></i></button>
 </div>
-<form action="#n" aria-label="Repetition mode" class="anim-state" name="_anim_loop_select7bab230dce944c55a04722a65da50971" title="Repetition mode">
-<input id="_anim_radio1_7bab230dce944c55a04722a65da50971" name="state" type="radio" value="once"/>
-<label for="_anim_radio1_7bab230dce944c55a04722a65da50971">Once</label>
-<input checked="" id="_anim_radio2_7bab230dce944c55a04722a65da50971" name="state" type="radio" value="loop"/>
-<label for="_anim_radio2_7bab230dce944c55a04722a65da50971">Loop</label>
-<input id="_anim_radio3_7bab230dce944c55a04722a65da50971" name="state" type="radio" value="reflect"/>
-<label for="_anim_radio3_7bab230dce944c55a04722a65da50971">Reflect</label>
+<form action="#n" aria-label="Repetition mode" class="anim-state" name="_anim_loop_selectec93958c03514b12915a60e01968a4d3" title="Repetition mode">
+<input id="_anim_radio1_ec93958c03514b12915a60e01968a4d3" name="state" type="radio" value="once"/>
+<label for="_anim_radio1_ec93958c03514b12915a60e01968a4d3">Once</label>
+<input checked="" id="_anim_radio2_ec93958c03514b12915a60e01968a4d3" name="state" type="radio" value="loop"/>
+<label for="_anim_radio2_ec93958c03514b12915a60e01968a4d3">Loop</label>
+<input id="_anim_radio3_ec93958c03514b12915a60e01968a4d3" name="state" type="radio" value="reflect"/>
+<label for="_anim_radio3_ec93958c03514b12915a60e01968a4d3">Reflect</label>
 </form>
 </div>
 </div>
@@ -10078,9 +10059,9 @@ input[type=range].anim-slider {
   /* Instantiate the Animation class. */
   /* The IDs given should match those used in the template above. */
   (function() {
-    var img_id = "_anim_img7bab230dce944c55a04722a65da50971";
-    var slider_id = "_anim_slider7bab230dce944c55a04722a65da50971";
-    var loop_select_id = "_anim_loop_select7bab230dce944c55a04722a65da50971";
+    var img_id = "_anim_imgec93958c03514b12915a60e01968a4d3";
+    var slider_id = "_anim_sliderec93958c03514b12915a60e01968a4d3";
+    var loop_select_id = "_anim_loop_selectec93958c03514b12915a60e01968a4d3";
     var frames = new Array(50);
     
   frames[0] = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAoAAAAHgCAYAAAA10dzkAAAAOnRFWHRTb2Z0d2FyZQBNYXRwbG90\
@@ -29954,7 +29935,7 @@ REQehgWQiIiIyMOwABIRERF5GBZAIiIiIg/DAkhERETkYVgAiYiIiDwMCyARERGRh2EBJCIiIvIw\
     /* set a timeout to make sure all the above elements are created before
        the object is initialized. */
     setTimeout(function() {
-        anim7bab230dce944c55a04722a65da50971 = new Animation(frames, img_id, slider_id, 50.0,
+        animec93958c03514b12915a60e01968a4d3 = new Animation(frames, img_id, slider_id, 50.0,
                                  loop_select_id);
     }, 0);
   })()
@@ -30135,9 +30116,9 @@ Test error t = 0.0: 6.134e-03
 <div class="jp-OutputArea-child">
 <div class="jp-OutputPrompt jp-OutputArea-prompt"></div>
 <div class="jp-RenderedText jp-OutputArea-output" data-mime-type="application/vnd.jupyter.stderr" tabindex="0">
-<pre>/home/fifi/pdesolver_prod/PDESolver.py:4297: RuntimeWarning: invalid value encountered in divide
+<pre>/home/fifi/pdesolver_prod/PDESolver.py:4735: RuntimeWarning: invalid value encountered in divide
   return np.where(np.abs(z) &gt; 1e-12, (np.exp(z) - 1) / z, 1.0)
-/home/fifi/pdesolver_prod/PDESolver.py:4300: RuntimeWarning: invalid value encountered in divide
+/home/fifi/pdesolver_prod/PDESolver.py:4738: RuntimeWarning: invalid value encountered in divide
   return np.where(np.abs(z) &gt; 1e-12, (np.exp(z) - 1 - z) / z**2, 0.5)
 </pre>
 </div>
@@ -30990,10 +30971,6 @@ Raw characteristic equation:
 Temporal order from dispersion relation: 1
 self.pseudo_terms =  [(-1, -xi**2)]
 ✅ Time derivative coefficient detected: 1
-
-symbol = 
-  2
--ξ 
 ⚠️ For psiOp, use interactive_symbol_analysis.
 
 *******************
@@ -31194,7 +31171,13 @@ Raw characteristic equation:
 0.1⋅kx  - ⅈ⋅ω
 Temporal order from dispersion relation: 1
 self.pseudo_terms =  []
-
+</pre>
+</div>
+</div>
+<div class="jp-OutputArea-child">
+<div class="jp-OutputPrompt jp-OutputArea-prompt"></div>
+<div class="jp-RenderedText jp-OutputArea-output" data-mime-type="text/plain" tabindex="0">
+<pre>
 --- Solutions found ---
 ⎡         2⎤
 ⎣-0.1⋅ⅈ⋅kx ⎦
@@ -31431,9 +31414,6 @@ Raw characteristic equation:
 Temporal order from dispersion relation: 1
 self.pseudo_terms =  [(1, sin(x) + 1)]
 ✅ Time derivative coefficient detected: 1
-
-symbol = 
-sin(x) + 1
 ⚠️ For psiOp, use interactive_symbol_analysis.
 
 *******************
@@ -31629,13 +31609,7 @@ self.pseudo_terms =  []
 
 --- Solutions found ---
 [-kx, kx]
-</pre>
-</div>
-</div>
-<div class="jp-OutputArea-child">
-<div class="jp-OutputPrompt jp-OutputArea-prompt"></div>
-<div class="jp-RenderedText jp-OutputArea-output" data-mime-type="text/plain" tabindex="0">
-<pre>
+
 --- Final linear operator ---
    2
 -kx 
@@ -32722,17 +32696,7 @@ Raw characteristic equation:
 Temporal order from dispersion relation: 2
 self.pseudo_terms =  [(-1, -xi**2)]
 ✅ Time derivative coefficient detected: 1
-
-symbol = 
-  2
--ξ 
-</pre>
-</div>
-</div>
-<div class="jp-OutputArea-child">
-<div class="jp-OutputPrompt jp-OutputArea-prompt"></div>
-<div class="jp-RenderedText jp-OutputArea-output" data-mime-type="text/plain" tabindex="0">
-<pre>⚠️ For psiOp, use interactive_symbol_analysis.
+⚠️ For psiOp, use interactive_symbol_analysis.
 
 *******************
 * Solving the PDE *
@@ -33021,10 +32985,6 @@ Raw characteristic equation:
 Temporal order from dispersion relation: 2
 self.pseudo_terms =  [(1, xi**2 + cos(x))]
 ✅ Time derivative coefficient detected: 1
-
-symbol = 
- 2         
-ξ  + cos(x)
 </pre>
 </div>
 </div>
@@ -33442,10 +33402,6 @@ Raw characteristic equation:
 Temporal order from dispersion relation: 1
 self.pseudo_terms =  [(I, -xi**2)]
 ✅ Time derivative coefficient detected: 1
-
-symbol = 
-  2
--ξ 
 </pre>
 </div>
 </div>

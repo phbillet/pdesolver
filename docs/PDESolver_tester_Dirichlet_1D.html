@@ -7649,10 +7649,6 @@ Symbol terms: []
 Pseudo terms: [(1, xi**2 + 1)]
 Source terms: [-sin(x)]
 ⚠️  Pseudo‑differential operator detected: all other linear terms have been rejected.
-
-symbol = 
- 2    
-ξ  + 1
 ⚠️ For psiOp, use interactive_symbol_analysis.
 
 *******************************
@@ -7660,10 +7656,6 @@ symbol =
 *******************************
 
 boundary condition:  dirichlet
-
-symbol = 
- 2    
-ξ  + 1
 ✅ Elliptic pseudo-differential symbol: inversion allowed.
 Right inverse asymptotic symbol:
   1   
@@ -7788,10 +7780,6 @@ Symbol terms: []
 Pseudo terms: [(1, x**2*xi**2 + 1)]
 Source terms: [-sin(x)]
 ⚠️  Pseudo‑differential operator detected: all other linear terms have been rejected.
-
-symbol = 
- 2  2    
-x ⋅ξ  + 1
 ⚠️ For psiOp, use interactive_symbol_analysis.
 
 *******************************
@@ -7799,10 +7787,6 @@ x ⋅ξ  + 1
 *******************************
 
 boundary condition:  dirichlet
-
-symbol = 
- 2  2    
-x ⋅ξ  + 1
 ✅ Elliptic pseudo-differential symbol: inversion allowed.
 Right inverse asymptotic symbol:
     1    
@@ -7948,10 +7932,6 @@ Raw characteristic equation:
 Temporal order from dispersion relation: 1
 self.pseudo_terms =  [(1, xi**2 + 1)]
 ✅ Time derivative coefficient detected: 1
-
-symbol = 
- 2    
-ξ  + 1
 ⚠️ For psiOp, use interactive_symbol_analysis.
 
 *******************
@@ -8150,10 +8130,6 @@ Raw characteristic equation:
 Temporal order from dispersion relation: 2
 self.pseudo_terms =  [(-1, -xi**2)]
 ✅ Time derivative coefficient detected: 1
-
-symbol = 
-  2
--ξ 
 ⚠️ For psiOp, use interactive_symbol_analysis.
 
 *******************
@@ -8439,10 +8415,6 @@ Raw characteristic equation:
 Temporal order from dispersion relation: 1
 self.pseudo_terms =  [(-1, I*xi**2)]
 ✅ Time derivative coefficient detected: 1
-
-symbol = 
-   2
-ⅈ⋅ξ 
 </pre>
 </div>
 </div>
@@ -8463,7 +8435,7 @@ Test error t = 0.0: 7.670e-04
 <div class="jp-OutputArea-child">
 <div class="jp-OutputPrompt jp-OutputArea-prompt"></div>
 <div class="jp-RenderedText jp-OutputArea-output" data-mime-type="application/vnd.jupyter.stderr" tabindex="0">
-<pre>/home/fifi/pdesolver_prod/PDESolver.py:3602: RuntimeWarning: invalid value encountered in divide
+<pre>/home/fifi/pdesolver_prod/PDESolver.py:4040: RuntimeWarning: invalid value encountered in divide
   phi1_L = (exp_L - 1.0) / (self.dt * L_vals)
 </pre>
 </div>
@@ -8664,10 +8636,6 @@ Raw characteristic equation:
 Temporal order from dispersion relation: 1
 self.pseudo_terms =  [(1, x**2 + 1)]
 ✅ Time derivative coefficient detected: 1
-
-symbol = 
- 2    
-x  + 1
 ⚠️ For psiOp, use interactive_symbol_analysis.
 
 *******************
@@ -8893,17 +8861,7 @@ Raw characteristic equation:
 Temporal order from dispersion relation: 2
 self.pseudo_terms =  [(1, x**2 + xi**2)]
 ✅ Time derivative coefficient detected: 1
-
-symbol = 
- 2    2
-x  + ξ 
-</pre>
-</div>
-</div>
-<div class="jp-OutputArea-child">
-<div class="jp-OutputPrompt jp-OutputArea-prompt"></div>
-<div class="jp-RenderedText jp-OutputArea-output" data-mime-type="text/plain" tabindex="0">
-<pre>⚠️ For psiOp, use interactive_symbol_analysis.
+⚠️ For psiOp, use interactive_symbol_analysis.
 
 *******************
 * Solving the PDE *
@@ -9117,10 +9075,6 @@ Raw characteristic equation:
 Temporal order from dispersion relation: 2
 self.pseudo_terms =  [(1, x + xi**2)]
 ✅ Time derivative coefficient detected: 1
-
-symbol = 
-     2
-x + ξ 
 ⚠️ For psiOp, use interactive_symbol_analysis.
 
 *******************
@@ -9344,10 +9298,6 @@ Raw characteristic equation:
 Temporal order from dispersion relation: 2
 self.pseudo_terms =  [(1, x**2 + xi**2)]
 ✅ Time derivative coefficient detected: 1
-
-symbol = 
- 2    2
-x  + ξ 
 ⚠️ For psiOp, use interactive_symbol_analysis.
 
 *******************
@@ -9566,10 +9516,6 @@ Raw characteristic equation:
 Temporal order from dispersion relation: 2
 self.pseudo_terms =  [(1, xi**2)]
 ✅ Time derivative coefficient detected: 1
-
-symbol = 
- 2
-ξ 
 ⚠️ For psiOp, use interactive_symbol_analysis.
 
 *******************
