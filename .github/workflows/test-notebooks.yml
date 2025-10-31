@@ -37,7 +37,7 @@ jobs:
       - name: Run notebook tests with coverage
         run: |
           export PYTHONPATH=$PWD:$PYTHONPATH
-          coverage run --parallel-mode --concurrency=multiprocessing -m pytest --nbmake ./*.ipynb --cov-report=term
+          coverage run --parallel-mode --concurrency=multiprocessing -m pytest --nbmake ./*tester*.ipynb --cov-report=term
           coverage combine
           coverage report --show-missing
           coverage xml

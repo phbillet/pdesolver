@@ -194,18 +194,22 @@ Dependencies
 - scipy.fft, scipy.integrate, scipy.signal
 """
 import numpy as np
+from numpy.linalg import svd
 import matplotlib.pyplot as plt
 from scipy.fft import fft2, ifft2, fft, ifft, fftfreq, fftshift, ifftshift
 from scipy.signal.windows import hann
 from scipy.integrate import solve_ivp
 from scipy.ndimage import maximum_filter
+from scipy.sparse import diags
+from scipy.sparse.linalg import svds 
+from scipy.integrate import trapezoid as scipy_trapezoid
 from sympy import (
     symbols, Function, 
     solve, pprint, Mul,
     lambdify, expand, Eq, simplify, trigsimp, N,
     radsimp, ratsimp, cancel,
-    Lambda, Piecewise, Basic, degree, Pow, preorder_traversal, 
-    powdenest, expand, 
+    Lambda, Piecewise, Basic, degree, Pow, preorder_traversal, Heaviside, 
+    powdenest, expand, Matrix,
     sqrt, I,  pi, series, oo, 
     re, im, arg, Abs, conjugate, 
     sin, cos, tan, cot, sec, csc, sinc,
@@ -218,7 +222,12 @@ from sympy import (
     fourier_transform, inverse_fourier_transform,
 )
 from sympy.core.function import AppliedUndef
-from scipy.special import legendre, eval_hermite, airy, eval_genlaguerre
+from scipy.special import legendre, eval_hermite, airy, eval_genlaguerre, jv, kv, sph_harm, gamma
+from scipy.spatial.distance import cdist
+from scipy.stats import norm
+from scipy.stats import wasserstein_distance
+from scipy.interpolate import RegularGridInterpolator
+from scipy.integrate import odeint
 from matplotlib import cm
 from matplotlib.animation import FuncAnimation, FFMpegWriter
 import matplotlib.animation as animation
@@ -231,6 +240,7 @@ from misc import *
 from IPython.display import display, clear_output, HTML, Video
 from ipywidgets import interact, FloatSlider, Dropdown, VBox, HBox, interactive_output
 from itertools import product
+from mpl_toolkits.mplot3d import Axes3D
 import os
 
     
@@ -861,6 +871,61 @@ class PseudoDifferentialOperator:
         else:
             raise NotImplementedError("Only 1D and 2D cases are implemented")
 
+    def compose_asymptotic_old(self, other, order=1):
+        """
+        Compose this pseudo-differential operator with another using formal asymptotic expansion.
+
+        This method computes the composition symbol via an asymptotic expansion in powers of 
+        derivatives, following the symbolic calculus of pseudo-differential operators. The 
+        composition is performed up to the specified order and respects the dimensionality 
+        (1D or 2D) of the operators.
+
+        Parameters
+        ----------
+        other : PseudoDifferentialOperator
+            The pseudo-differential operator to compose with this one.
+        order : int, default=1
+            Maximum order of the asymptotic expansion. Higher values include more terms in the 
+            symbolic composition, increasing accuracy at the cost of complexity.
+
+        Returns
+        -------
+        sympy.Expr
+            Symbolic expression representing the asymptotic expansion of the composed operator.
+
+        Notes
+        -----
+        - In 1D, the composition uses the formula:
+          (p ∘ q)(x, ξ) ~ Σₙ (1/n!) ∂_ξⁿ p(x, ξ) ∂_xⁿ q(x, ξ) (i)^{-n}
+        - In 2D, the multi-index generalization is used:
+          (p ∘ q)(x, y, ξ, η) ~ Σₙ Σᵢ (1/(i! j!)) ∂_ξⁱ∂_ηʲ p ∂_xⁱ∂_yʲ q (i)^{-n}, where n = i + j.
+        - This expansion is valid for symbols admitting an asymptotic series representation.
+        - Operators must be defined on the same spatial domain (same dimension).
+        """
+
+        assert self.dim == other.dim, "Operator dimensions must match"
+        p, q = self.symbol, other.symbol
+    
+        if self.dim == 1:
+            x = self.vars_x[0]
+            xi = symbols('xi', real=True)
+            result = 0
+            for n in range(order + 1):
+                term = (1 / factorial(n)) * diff(p, xi, n) * diff(q, x, n) * (1j)**(-n)
+                result += term
+    
+        elif self.dim == 2:
+            x, y = self.vars_x
+            xi, eta = symbols('xi eta', real=True)
+            result = 0
+            for n in range(order + 1):
+                for i in range(n + 1):
+                    j = n - i
+                    term = (1 / (factorial(i) * factorial(j))) * \
+                           diff(p, xi, i, eta, j) * diff(q, x, i, y, j) * (1j)**(-n)
+                    result += term
+    
+        return result
 
     def commutator_symbolic(self, other, order=1):
         """
