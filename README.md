@@ -63,6 +63,7 @@ It supports:
 - Animated solution visualizations (1D/2D).
 - Interactive `ipywidgets` for symbol inspection.
 - Phase front overlay & singularity tracking.
+- Advanced visualizations in 1D and 2D with symbol (Hamiltonian) atlas.
 
 ---
 
@@ -118,6 +119,8 @@ HTML(ani.to_jshtml())
 | [`psiOp_tester`](https://phbillet.github.io/pdesolver/psiOp_tester.html)                                   | Tests `psiOp` visualization & symbolic analysis                                                     |
 | [`psiOp_quantization_evolution`](https://phbillet.github.io/pdesolver/psiOp_quantization_evolution.html)   | Tests `psiOp` quantization & evolution simulation                                                   |
 | [`psiOp_examples`](https://phbillet.github.io/pdesolver/psiOp_examples.html)                               | `psiOp` examples: symbol approximation, Heisenberg group and algebra, Geodesic flow, Ergodic theory |
+| [`visualization_1D`](https://phbillet.github.io/pdesolver/visualization_1D.html)                           | `psiOp` as Hamiltionian : Advanced visualizations (Geometric structure & Spectral theory)           |
+| [`visualization_2D`](https://phbillet.github.io/pdesolver/visualization_2D.html)                           | `psiOp` as Hamiltionian : Advanced visualizations (Geometric structure & Spectral theory) |
 | [`PDESolver_tester_1D_periodic`](https://phbillet.github.io/pdesolver/PDESolver_tester_periodic_1D.html)   | 1D periodic : stationary, transport, heat, wave, Schrödinger, fractional Laplacian, Klein-Gordon... |
 | [`PDESolver_tester_1D_Dirichlet`](https://phbillet.github.io/pdesolver/PDESolver_tester_Dirichlet_1D.html) | 1D Dirichlet: stationary, transport, heat, wave, Schrödinger, Airy, Hermite, Legendre...            |
 | [`PDESolver_tester_2D_periodic`](https://phbillet.github.io/pdesolver/PDESolver_tester_periodic_2D.html)   | 2D periodic : stationary, transport, heat, wave, Schrödinger, fractional Laplacian, Klein-Gordon... |

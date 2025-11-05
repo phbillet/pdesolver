@@ -8,8 +8,22 @@ import matplotlib.animation as animation
 import subprocess
 import os
 import soundfile as sf
+from sympy.core.function import AppliedUndef
+from sympy import Function
 
-# Miscellaneous functions
+# Miscellaneous functions and classes
+class Op(Function):
+    """Custom symbolic wrapper for pseudo-differential operators in Fourier space.
+    Usage: Op(symbol_expr, u)
+    """
+    nargs = 2
+
+class psiOp(Function):
+    """Symbolic wrapper for PseudoDifferentialOperator.
+    Usage: psiOp(symbol_expr, u)
+    """
+    nargs = 2   # (expr, u)
+
 
 def gaussian_function_1D(x, center, sigma):
     A = 1 / np.sqrt(2 * np.pi * sigma**2)  # Amplitude so that the integral is equal to 1

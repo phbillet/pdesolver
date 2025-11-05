@@ -243,23 +243,9 @@ from itertools import product
 from mpl_toolkits.mplot3d import Axes3D
 import os
 
-    
 plt.rcParams['text.usetex'] = False
 FFT_WORKERS = max(1, os.cpu_count() // 2)
 NUM_COLS = 150
-
-class Op(Function):
-    """Custom symbolic wrapper for pseudo-differential operators in Fourier space.
-    Usage: Op(symbol_expr, u)
-    """
-    nargs = 2
-
-
-class psiOp(Function):
-    """Symbolic wrapper for PseudoDifferentialOperator.
-    Usage: psiOp(symbol_expr, u)
-    """
-    nargs = 2   # (expr, u)
 
 class PseudoDifferentialOperator:
     """
@@ -871,63 +857,7 @@ class PseudoDifferentialOperator:
         else:
             raise NotImplementedError("Only 1D and 2D cases are implemented")
 
-    def compose_asymptotic_old(self, other, order=1):
-        """
-        Compose this pseudo-differential operator with another using formal asymptotic expansion.
-
-        This method computes the composition symbol via an asymptotic expansion in powers of 
-        derivatives, following the symbolic calculus of pseudo-differential operators. The 
-        composition is performed up to the specified order and respects the dimensionality 
-        (1D or 2D) of the operators.
-
-        Parameters
-        ----------
-        other : PseudoDifferentialOperator
-            The pseudo-differential operator to compose with this one.
-        order : int, default=1
-            Maximum order of the asymptotic expansion. Higher values include more terms in the 
-            symbolic composition, increasing accuracy at the cost of complexity.
-
-        Returns
-        -------
-        sympy.Expr
-            Symbolic expression representing the asymptotic expansion of the composed operator.
-
-        Notes
-        -----
-        - In 1D, the composition uses the formula:
-          (p ∘ q)(x, ξ) ~ Σₙ (1/n!) ∂_ξⁿ p(x, ξ) ∂_xⁿ q(x, ξ) (i)^{-n}
-        - In 2D, the multi-index generalization is used:
-          (p ∘ q)(x, y, ξ, η) ~ Σₙ Σᵢ (1/(i! j!)) ∂_ξⁱ∂_ηʲ p ∂_xⁱ∂_yʲ q (i)^{-n}, where n = i + j.
-        - This expansion is valid for symbols admitting an asymptotic series representation.
-        - Operators must be defined on the same spatial domain (same dimension).
-        """
-
-        assert self.dim == other.dim, "Operator dimensions must match"
-        p, q = self.symbol, other.symbol
-    
-        if self.dim == 1:
-            x = self.vars_x[0]
-            xi = symbols('xi', real=True)
-            result = 0
-            for n in range(order + 1):
-                term = (1 / factorial(n)) * diff(p, xi, n) * diff(q, x, n) * (1j)**(-n)
-                result += term
-    
-        elif self.dim == 2:
-            x, y = self.vars_x
-            xi, eta = symbols('xi eta', real=True)
-            result = 0
-            for n in range(order + 1):
-                for i in range(n + 1):
-                    j = n - i
-                    term = (1 / (factorial(i) * factorial(j))) * \
-                           diff(p, xi, i, eta, j) * diff(q, x, i, y, j) * (1j)**(-n)
-                    result += term
-    
-        return result
-
-    def commutator_symbolic(self, other, order=1):
+    def commutator_symbolic(self, other, order=1, mode='kn', sign_convention=None):
         """
         Compute the symbolic commutator [A, B] = A∘B − B∘A of two pseudo-differential operators
         using formal asymptotic expansion of their composition symbols.
@@ -952,52 +882,16 @@ class PseudoDifferentialOperator:
             Symbolic expression for the asymptotic expansion of the commutator symbol 
             σ([A,B]) = σ(A∘B − B∘A).
     
-        Notes
-        -----
-        - In 1D, the expansion follows:
-              σ([A,B])(x, ξ) ~ Σₙ (1/n!) (i)^{-n} 
-                  [ ∂_ξⁿ p ∂_xⁿ q − ∂_ξⁿ q ∂_xⁿ p ].
-    
-          The leading term (n=1) gives:
-              σ([A,B]) ≈ (1/i) {p, q} = (1/i)(∂_ξ p ∂_x q − ∂_x p ∂_ξ q).
-    
-        - In 2D, the multi-index generalization is used:
-              σ([A,B])(x, y, ξ, η) ~ Σₙ Σᵢ (1/(i! j!))(i)^{-n}
-                  [ ∂_ξⁱ∂_ηʲ p ∂_xⁱ∂_yʲ q − ∂_ξⁱ∂_ηʲ q ∂_xⁱ∂_yʲ p ],
-              with n = i + j.
-    
-        - This expansion is valid for symbols admitting asymptotic expansions in |ξ|→∞.
-          Both operators must act on the same spatial dimension.
         """
         assert self.dim == other.dim, "Operator dimensions must match"
         p, q = self.symbol, other.symbol
     
-        if self.dim == 1:
-            x = self.vars_x[0]
-            xi = symbols('xi', real=True)
-            comm_symbol = 0
-            for n in range(1, order + 1):
-                term = (1 / factorial(n)) * (1j)**(-n) * (
-                    diff(p, xi, n) * diff(q, x, n) -
-                    diff(q, xi, n) * diff(p, x, n)
-                )
-                comm_symbol += term
-    
-        elif self.dim == 2:
-            x, y = self.vars_x
-            xi, eta = symbols('xi eta', real=True)
-            comm_symbol = 0
-            for n in range(1, order + 1):
-                for i in range(n + 1):
-                    j = n - i
-                    coef = (1 / (factorial(i) * factorial(j))) * (1j)**(-n)
-                    term = coef * (
-                        diff(p, xi, i, eta, j) * diff(q, x, i, y, j) -
-                        diff(q, xi, i, eta, j) * diff(p, x, i, y, j)
-                    )
-                    comm_symbol += term
-    
-        return simplify(comm_symbol)
+        pq = self.compose_asymptotic(other, order=order, mode=mode, sign_convention=sign_convention)
+        qp = other.compose_asymptotic(self, order=order, mode=mode, sign_convention=sign_convention)
+        
+        comm_symbol = simplify(pq-qp)
+
+        return comm_symbol
 
     def right_inverse_asymptotic(self, order=1):
         """
@@ -1152,7 +1046,7 @@ class PseudoDifferentialOperator:
             p_star = simplify(series(p_star, sqrt(xi**2 + eta**2), oo, n=6).removeO())
             return p_star
 
-    def exponential_symbol(self, t=1.0, order=3):
+    def exponential_symbol(self, t=1.0, order=1, mode='kn', sign_convention=None):
         """
         Compute the symbol of exp(tP) using asymptotic expansion methods.
         
@@ -1218,7 +1112,7 @@ class PseudoDifferentialOperator:
                 temp_op = PseudoDifferentialOperator(
                     current_power, [x], mode='symbol'
                 )
-                current_power = temp_op.compose_asymptotic(self, order=order)
+                current_power = temp_op.compose_asymptotic(self, order=order, mode=mode, sign_convention=sign_convention)
                 
                 # Add term (t^n/n!) * P^n
                 coeff = t**n / factorial(n)
@@ -1243,7 +1137,7 @@ class PseudoDifferentialOperator:
                 temp_op = PseudoDifferentialOperator(
                     current_power, [x, y], mode='symbol'
                 )
-                current_power = temp_op.compose_asymptotic(self, order=order)
+                current_power = temp_op.compose_asymptotic(self, order=order, mode=mode, sign_convention=sign_convention)
                 
                 # Add term (t^n/n!) * P^n
                 coeff = t**n / factorial(n)
