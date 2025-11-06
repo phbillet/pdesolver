@@ -14,6 +14,7 @@
 """
 SymbolVisualizer2D: Geometric and semi-classical tool for 2D pseudo-differential operators
 Unified version combining modular structure and rigorous caustic handling
+
 Architecture:
 - Modular object-oriented structure (v1)
 - Full 4×4 Jacobian computation for precise caustic detection (v2)
@@ -27,6 +28,7 @@ import matplotlib.pyplot as plt
 from matplotlib import cm
 from mpl_toolkits.mplot3d import Axes3D
 import sympy as sp
+from sympy import DiracDelta, Heaviside
 from scipy.integrate import solve_ivp
 from scipy.optimize import fsolve
 from scipy.signal import find_peaks
@@ -40,11 +42,14 @@ from matplotlib.gridspec import GridSpec
 import matplotlib.tri as tri
 from matplotlib.colors import LinearSegmentedColormap
 warnings.filterwarnings('ignore')
+
 # ============================================================================
 # MODULAR DATA STRUCTURES (enhanced v1)
 # ============================================================================
+
 @dataclass
 class Geodesic2D:
+
     """2D phase space geodesic trajectory with caustic analysis"""
     t: np.ndarray           # Time
     x: np.ndarray           # Position x
@@ -55,24 +60,29 @@ class Geodesic2D:
     J_full: np.ndarray      # Full 4x4 Jacobian (complete evolution)
     det_caustic: np.ndarray # Determinant ∂(x,y)/∂(ξ₀,η₀) for caustic detection
     caustic_indices: np.ndarray # Indices where caustics occur
+
     @property
     def energy(self) -> float:
         """Constant energy along the geodesic"""
         return self.H[0]
+
     @property
     def spatial_trajectory(self) -> np.ndarray:
         """Trajectory in configuration space (x,y)"""
         return np.column_stack([self.x, self.y])
+    
     @property
     def momentum_trajectory(self) -> np.ndarray:
         """Trajectory in momentum space (ξ,η)"""
         return np.column_stack([self.xi, self.eta])
+    
     @property
     def caustic_points(self) -> Tuple[np.ndarray, np.ndarray]:
         """Caustic points (x,y) along the trajectory"""
         if len(self.caustic_indices) == 0:
             return np.array([]), np.array([])
         return self.x[self.caustic_indices], self.y[self.caustic_indices]
+
 @dataclass
 class PeriodicOrbit2D:
     """2D periodic orbit in phase space with quantum characteristics"""
@@ -91,14 +101,17 @@ class PeriodicOrbit2D:
     eta_cycle: np.ndarray
     t_cycle: np.ndarray
     maslov_index: int       # Maslov index (number of caustic crossings)
+
     @property
     def is_stable(self) -> bool:
         """Check if orbit is stable (KAM)"""
         return self.stability_1 < 0 and self.stability_2 < 0
+
     @property
     def bohr_sommerfeld_condition(self) -> float:
         """Bohr-Sommerfeld quantization condition with Maslov correction"""
         return self.action / (2 * np.pi) - self.maslov_index / 4
+
 @dataclass
 class CausticStructure:
     """Caustic structure with classification and physical properties"""
@@ -109,9 +122,18 @@ class CausticStructure:
     type: str               # 'fold', 'cusp', 'swallowtail'
     maslov_index: int       # Associated Maslov index
     strength: float         # Singularity intensity
+
 # ============================================================================
 # GEOMETRIC AND PHYSICAL ENGINE (merged v1 + v2)
 # ============================================================================
+
+def _sanitize(expr):
+    """Remove DiracDelta, Heaviside, and undefined sign terms for numeric use."""
+    expr = expr.replace(sp.DiracDelta, lambda *args: 0)
+    expr = expr.replace(sp.Heaviside, lambda *args: 1)
+    expr = sp.simplify(expr)
+    return expr
+    
 class SymbolGeometry2D:
     """
     Full geometric and semi-classical analysis of a 2D symbol
@@ -140,23 +162,39 @@ class SymbolGeometry2D:
         self.xi_sym = xi_sym
         self.eta_sym = eta_sym
         self.hbar = hbar
+            
         print(f"Initializing 2D geometry engine for H = {self.H_sym} with ℏ = {self.hbar}")
         # --- First derivatives (Hamiltonian vector field) ---
-        self.dH_dx_sym = sp.diff(self.H_sym, self.x_sym)
-        self.dH_dy_sym = sp.diff(self.H_sym, self.y_sym)
-        self.dH_dxi_sym = sp.diff(self.H_sym, self.xi_sym)
-        self.dH_deta_sym = sp.diff(self.H_sym, self.eta_sym)
+        dH_x = sp.diff(self.H_sym, self.x_sym)
+        self.dH_dx_sym = _sanitize(dH_x)
+        dH_y = sp.diff(self.H_sym, self.y_sym)
+        self.dH_dy_sym = _sanitize(dH_y)
+        dH_xi = sp.diff(self.H_sym, self.xi_sym)
+        self.dH_dxi_sym = _sanitize(dH_xi)
+        dH_eta = sp.diff(self.H_sym, self.eta_sym)
+        self.dH_deta_sym = _sanitize(dH_eta)
+
         # --- Second derivatives for variational equations ---
-        self.d2H_dx2_sym = sp.diff(self.dH_dx_sym, self.x_sym)
-        self.d2H_dy2_sym = sp.diff(self.dH_dy_sym, self.y_sym)
-        self.d2H_dxi2_sym = sp.diff(self.dH_dxi_sym, self.xi_sym)
-        self.d2H_deta2_sym = sp.diff(self.dH_deta_sym, self.eta_sym)
-        self.d2H_dxdy_sym = sp.diff(self.dH_dx_sym, self.y_sym)
-        self.d2H_dxdxi_sym = sp.diff(self.dH_dx_sym, self.xi_sym)
-        self.d2H_dxdeta_sym = sp.diff(self.dH_dx_sym, self.eta_sym)
-        self.d2H_dydxi_sym = sp.diff(self.dH_dy_sym, self.xi_sym)
-        self.d2H_dyeta_sym = sp.diff(self.dH_dy_sym, self.eta_sym)
-        self.d2H_dxideta_sym = sp.diff(self.dH_dxi_sym, self.eta_sym)
+        d2H_x2 = sp.diff(self.dH_dx_sym, self.x_sym)
+        self.d2H_dx2_sym = _sanitize(d2H_x2)
+        d2H_y2 = sp.diff(self.dH_dy_sym, self.y_sym)
+        self.d2H_dy2_sym = _sanitize(d2H_y2)
+        d2H_xi2 = sp.diff(self.dH_dxi_sym, self.xi_sym)
+        self.d2H_dxi2_sym = _sanitize(d2H_xi2)
+        d2H_eta2 = sp.diff(self.dH_deta_sym, self.eta_sym)
+        self.d2H_deta2_sym = _sanitize(d2H_eta2)
+        d2H_xy = sp.diff(self.dH_dx_sym, self.y_sym)
+        self.d2H_dxdy_sym = _sanitize(d2H_xy)
+        d2H_xxi = sp.diff(self.dH_dx_sym, self.xi_sym)
+        self.d2H_dxdxi_sym = _sanitize(d2H_xxi)
+        d2H_xeta = sp.diff(self.dH_dx_sym, self.eta_sym)
+        self.d2H_dxdeta_sym = _sanitize(d2H_xeta)
+        d2H_yxi = sp.diff(self.dH_dy_sym, self.xi_sym)
+        self.d2H_dydxi_sym = _sanitize(d2H_yxi)
+        d2H_yeta = sp.diff(self.dH_dy_sym, self.eta_sym)
+        self.d2H_dyeta_sym = _sanitize(d2H_yeta)
+        d2H_xieta = sp.diff(self.dH_dxi_sym, self.eta_sym)
+        self.d2H_dxideta_sym = _sanitize(d2H_xieta)
         # --- Hessian for variational equations ---
         self.Hessian = sp.Matrix([
             [self.d2H_dx2_sym, self.d2H_dxdy_sym, self.d2H_dxdxi_sym, self.d2H_dxdeta_sym],
@@ -164,8 +202,10 @@ class SymbolGeometry2D:
             [self.d2H_dxdxi_sym, self.d2H_dydxi_sym, self.d2H_dxi2_sym, self.d2H_dxideta_sym],
             [self.d2H_dxdeta_sym, self.d2H_dyeta_sym, self.d2H_dxideta_sym, self.d2H_deta2_sym]
         ])
+
         # --- Convert to numerical functions ---
         self._lambdify_functions()
+  
     def _safe_lambdify(self, args: tuple, expr: sp.Expr) -> Callable:
         """Safe conversion of sympy expressions to numerical functions"""
         if isinstance(expr, (int, float, sp.Integer, sp.Float)):
@@ -176,6 +216,7 @@ class SymbolGeometry2D:
         except Exception as e:
             print(f"Warning: lambdify failed for {expr}. Error: {e}")
             return lambda x, y, xi, eta: np.full_like(x, np.nan)
+
     def _lambdify_functions(self):
         """Convert all symbolic expressions to numerical functions"""
         args = (self.x_sym, self.y_sym, self.xi_sym, self.eta_sym)
@@ -191,6 +232,7 @@ class SymbolGeometry2D:
             for j in range(4):
                 row_funcs.append(self._safe_lambdify(args, self.Hessian[i,j]))
             self.second_derivs_funcs.append(row_funcs)
+    
     def _hamiltonian_system_augmented(self, t: float, z: np.ndarray) -> np.ndarray:
         """
         Augmented Hamiltonian system with variational equations for Jacobian evolution
@@ -228,6 +270,7 @@ class SymbolGeometry2D:
         except Exception as e:
             print(f"Integration error at t={t}, z={z}: {e}")
             return np.zeros(20)
+    
     def compute_geodesic(self, x0: float, y0: float, 
                         xi0: float, eta0: float,
                         t_max: float, n_points: int = 500) -> Geodesic2D:
@@ -290,6 +333,7 @@ class SymbolGeometry2D:
             det_caustic=det_caustic,
             caustic_indices=caustic_indices
         )
+    
     def find_periodic_orbits_2d(self, energy: float,
                                x_range: Tuple[float, float],
                                y_range: Tuple[float, float],
@@ -363,6 +407,7 @@ class SymbolGeometry2D:
                         except Exception as e:
                             continue
         return self._remove_duplicate_orbits_2d(orbits)
+    
     def _compute_stability_2d(self, x0, y0, xi0, eta0, T):
         """Compute the largest Lyapunov exponent"""
         def linearized(t, z):
@@ -389,6 +434,7 @@ class SymbolGeometry2D:
             pert = np.sqrt(sol.y[4][-1]**2 + sol.y[5][-1]**2)
             return np.log(pert / eps) / T
         return np.nan
+    
     def _remove_duplicate_orbits_2d(self, orbits):
         """Remove duplicate periodic orbits"""
         unique = []
@@ -402,6 +448,7 @@ class SymbolGeometry2D:
             if not is_dup:
                 unique.append(orb)
         return unique
+    
     def detect_caustic_structures(self, geodesics: List[Geodesic2D], 
                                  t_fixed: float) -> List[CausticStructure]:
         """
@@ -429,6 +476,7 @@ class SymbolGeometry2D:
         # Cluster points into caustic structures
         caustic_structures = self._cluster_caustic_points(caustic_points, t_fixed)
         return caustic_structures
+    
     def _classify_caustic(self, geo: Geodesic2D, idx: int) -> str:
         """
         Caustic classification according to catastrophe theory
@@ -453,6 +501,7 @@ class SymbolGeometry2D:
         if np.max(curvature) > 2.0 * np.mean(curvature):
             return 'cusp'
         return 'fold'
+    
     def _cluster_caustic_points(self, points: List[dict], t_fixed: float) -> List[CausticStructure]:
         """Group caustic points into coherent structures"""
         if not points:
@@ -498,6 +547,7 @@ class SymbolGeometry2D:
                 strength=np.mean(strengths)
             ))
         return clusters
+    
     def compute_phase_space_volume(self, E_max: float, x_range: tuple, y_range: tuple,
                                  xi_range: tuple, eta_range: tuple, 
                                  n_samples: int = 200000) -> float:
@@ -515,6 +565,7 @@ class SymbolGeometry2D:
         total_volume = ((x_range[1]-x_range[0]) * (y_range[1]-y_range[0]) * 
                        (xi_range[1]-xi_range[0]) * (eta_range[1]-eta_range[0]))
         return volume_ratio * total_volume
+
 # ============================================================================
 # COMPLETE VISUALIZATION ENGINE (merged v1 + v2)
 # ============================================================================
@@ -524,6 +575,7 @@ class SymbolVisualizer2D:
     """
     def __init__(self, geometry: SymbolGeometry2D):
         self.geo = geometry
+
     def visualize_complete(self,
                           x_range: Tuple[float, float],
                           y_range: Tuple[float, float],
@@ -576,6 +628,7 @@ class SymbolVisualizer2D:
             geodesics, periodic_orbits, caustics, hbar, resolution
         )
         return fig, geodesics, periodic_orbits, caustics
+    
     def _compute_geodesics(self, params):
         """Compute geodesics with caustic detection"""
         geodesics = []
@@ -586,6 +639,7 @@ class SymbolVisualizer2D:
             geodesics.append(geo)
         return geodesics
 
+    
     def _create_complete_figure(self, E_range, x_range, y_range, xi_range, eta_range,
                                geodesics, periodic_orbits, caustics, hbar, resolution):
         """Creates an adaptive multi-panel figure: only relevant panels are displayed."""
@@ -699,6 +753,7 @@ class SymbolVisualizer2D:
         ax.set_zlabel('H')
         ax.set_title('Energy Surface\nH(x,y,ξ₀,η₀)', fontweight='bold', fontsize=10)
         ax.view_init(elev=25, azim=-45)
+    
     def _plot_configuration_space(self, fig, subplot_spec, geodesics, caustics):
         """Configuration space (x,y) with trajectories and caustics"""
         ax = fig.add_subplot(subplot_spec)
@@ -744,6 +799,7 @@ class SymbolVisualizer2D:
         by_label = dict(zip(labels, handles))
         if by_label:
             ax.legend(by_label.values(), by_label.keys(), fontsize=8, loc='upper right')
+    
     def _plot_jacobian_evolution(self, fig, subplot_spec, geodesics):
         """Evolution of Jacobian determinant with caustic detection"""
         ax = fig.add_subplot(subplot_spec)
@@ -761,6 +817,7 @@ class SymbolVisualizer2D:
         ax.set_title('Jacobian Determinant\nZeros = caustics', fontweight='bold', fontsize=10)
         ax.grid(True, alpha=0.3)
         ax.legend(fontsize=8)
+    
     def _plot_maslov_index_phase_shifts(self, fig, subplot_spec, geodesics, caustics):
         """Visualization of phase shifts due to Maslov index"""
         ax = fig.add_subplot(subplot_spec)
@@ -795,6 +852,7 @@ class SymbolVisualizer2D:
         ax.set_ylim(-1.5, 1.5)
         ax.grid(True, alpha=0.3)
         ax.legend(fontsize=8, loc='upper right')
+    
     def _plot_spectral_density_with_caustics(self, fig, subplot_spec, periodic_orbits, E_range):
         """Spectral density with caustic corrections"""
         ax = fig.add_subplot(subplot_spec)
@@ -848,6 +906,7 @@ class SymbolVisualizer2D:
         ax.set_title('Spectral Density\nwith caustic corrections', fontweight='bold', fontsize=10)
         ax.grid(True, alpha=0.3)
         ax.legend(fontsize=8)
+    
     def _plot_phase_space_volume(self, fig, subplot_spec, E_range, x_range, y_range, xi_range, eta_range):
         """Phase space volume via Monte Carlo"""
         ax = fig.add_subplot(subplot_spec)
@@ -879,6 +938,7 @@ class SymbolVisualizer2D:
         ax.set_title('Phase Space Volume\n(Monte Carlo)', fontweight='bold', fontsize=10)
         ax.grid(True, alpha=0.3)
         ax.legend(fontsize=8)
+    
     def _plot_caustic_network(self, fig, subplot_spec, x_range, y_range, geodesics):
         """Caustic network with multiple initial conditions"""
         ax = fig.add_subplot(subplot_spec)
@@ -929,6 +989,7 @@ class SymbolVisualizer2D:
         ax.set_ylim(y_range)
         ax.grid(True, alpha=0.3)
         ax.legend(fontsize=8)
+    
     # ======== STANDARD VISUALIZATION METHODS (similar to v1) ========
     # Following methods are similar to v1 but enhanced
     # to integrate caustics and new data structures
@@ -944,6 +1005,7 @@ class SymbolVisualizer2D:
         ax.set_ylabel('ξ')
         ax.set_title('Phase Space (x,ξ)', fontweight='bold', fontsize=10)
         ax.grid(True, alpha=0.3)
+    
     def _plot_phase_projection_y(self, fig, subplot_spec, geodesics):
         """Phase space projection (y,η)"""
         ax = fig.add_subplot(subplot_spec)
@@ -956,6 +1018,7 @@ class SymbolVisualizer2D:
         ax.set_ylabel('η')
         ax.set_title('Phase Space (y,η)', fontweight='bold', fontsize=10)
         ax.grid(True, alpha=0.3)
+    
     def _plot_momentum_space(self, fig, subplot_spec, geodesics):
         """Momentum space (ξ,η)"""
         ax = fig.add_subplot(subplot_spec)
@@ -969,6 +1032,7 @@ class SymbolVisualizer2D:
         ax.set_title('Momentum Space\n(ξ,η)', fontweight='bold', fontsize=10)
         ax.grid(True, alpha=0.3)
         ax.set_aspect('equal')
+    
     def _plot_vector_field_2d(self, fig, subplot_spec, x_range, y_range, geodesics, res):
         """Vector field in configuration space"""
         ax = fig.add_subplot(subplot_spec)
@@ -1000,6 +1064,7 @@ class SymbolVisualizer2D:
         ax.set_ylabel('y')
         ax.set_title('Vector Field\nFlow in configuration space', fontweight='bold', fontsize=10)
         ax.set_aspect('equal')
+    
     def _plot_group_velocity_2d(self, fig, subplot_spec, x_range, y_range, geodesics, res):
         """Group velocity magnitude |∇_p H|"""
         ax = fig.add_subplot(subplot_spec)
@@ -1027,6 +1092,7 @@ class SymbolVisualizer2D:
         ax.set_ylabel('y')
         ax.set_title('Group Velocity\n|∇_p H|', fontweight='bold', fontsize=10)
         ax.set_aspect('equal')
+    
     def _plot_caustic_curves_2d(self, fig, subplot_spec, geodesics, caustics):
         """Caustic curves in (x,y) space"""
         ax = fig.add_subplot(subplot_spec)
@@ -1061,6 +1127,7 @@ class SymbolVisualizer2D:
         by_label = dict(zip(labels, handles))
         if by_label:
             ax.legend(by_label.values(), by_label.keys(), fontsize=8)
+    
     def _plot_energy_conservation_2d(self, fig, subplot_spec, geodesics):
         """Energy conservation verification"""
         ax = fig.add_subplot(subplot_spec)
@@ -1074,6 +1141,7 @@ class SymbolVisualizer2D:
         ax.set_title('Energy Conservation\nNumerical quality', fontweight='bold', fontsize=10)
         ax.legend(fontsize=8)
         ax.grid(True, alpha=0.3, which='both')
+    
     def _plot_poincare_x(self, fig, subplot_spec, geodesics):
         """Poincaré section (x,ξ) at y=0"""
         ax = fig.add_subplot(subplot_spec)
@@ -1095,6 +1163,7 @@ class SymbolVisualizer2D:
         ax.set_ylabel('ξ')
         ax.set_title('Poincaré Section\n(x,ξ) at y=0', fontweight='bold', fontsize=10)
         ax.grid(True, alpha=0.3)
+    
     def _plot_poincare_y(self, fig, subplot_spec, geodesics):
         """Poincaré section (y,η) at x=0"""
         ax = fig.add_subplot(subplot_spec)
@@ -1116,6 +1185,7 @@ class SymbolVisualizer2D:
         ax.set_ylabel('η')
         ax.set_title('Poincaré Section\n(y,η) at x=0', fontweight='bold', fontsize=10)
         ax.grid(True, alpha=0.3)
+    
     def _plot_periodic_orbits_3d(self, fig, subplot_spec, periodic_orbits):
         """Periodic orbits in 3D (x,y,t)"""
         ax = fig.add_subplot(subplot_spec, projection='3d')
@@ -1129,6 +1199,7 @@ class SymbolVisualizer2D:
         ax.set_ylabel('y')
         ax.set_zlabel('t')
         ax.set_title('Periodic Orbits\nSpace-time view', fontweight='bold', fontsize=10)
+    
     def _plot_action_energy_2d(self, fig, subplot_spec, periodic_orbits):
         """Action vs Energy"""
         ax = fig.add_subplot(subplot_spec)
@@ -1142,6 +1213,7 @@ class SymbolVisualizer2D:
         ax.set_ylabel('Action S')
         ax.set_title('Action-Energy\nS(E)', fontweight='bold', fontsize=10)
         ax.grid(True, alpha=0.3)
+    
     def _plot_torus_quantization(self, fig, subplot_spec, periodic_orbits, hbar):
         """Torus quantization (KAM theory)"""
         ax = fig.add_subplot(subplot_spec)
@@ -1163,6 +1235,7 @@ class SymbolVisualizer2D:
         ax.set_title('Torus Quantization\nKAM theory', fontweight='bold', fontsize=10)
         ax.legend(fontsize=8)
         ax.grid(True, alpha=0.3)
+    
     def _plot_level_spacing_2d(self, fig, subplot_spec, periodic_orbits):
         """Level spacing distribution"""
         ax = fig.add_subplot(subplot_spec)
@@ -1189,6 +1262,7 @@ class SymbolVisualizer2D:
             ax.set_title('Level Spacing\nIntegrable vs Chaotic', fontweight='bold', fontsize=10)
             ax.legend(fontsize=8)
             ax.grid(True, alpha=0.3)
+
 # ============================================================================
 # MAIN INTERFACE
 # ============================================================================
@@ -1272,6 +1346,7 @@ def visualize_symbol_2d(symbol: sp.Expr,
         resolution=resolution
     )
     return results
+
 # ============================================================================
 # ADDITIONAL UTILITIES
 # ============================================================================
@@ -1286,6 +1361,7 @@ class Utilities2D:
         angles_unwrapped = np.unwrap(angles)
         winding = (angles_unwrapped[-1] - angles_unwrapped[0]) / (2 * np.pi)
         return winding
+
     @staticmethod
     def compute_rotation_numbers(geo: Geodesic2D) -> Tuple[float, float]:
         """
@@ -1298,6 +1374,7 @@ class Utilities2D:
         omega_x = (theta_x[-1] - theta_x[0]) / (geo.t[-1] - geo.t[0])
         omega_y = (theta_y[-1] - theta_y[0]) / (geo.t[-1] - geo.t[0])
         return omega_x / (2*np.pi), omega_y / (2*np.pi)
+    
     @staticmethod
     def detect_kam_tori(periodic_orbits: List[PeriodicOrbit2D],
                        tolerance: float = 0.1) -> Dict:
@@ -1337,6 +1414,7 @@ class Utilities2D:
             'n_tori': n_tori,
             'tori': tori
         }
+
 # ============================================================================
 # THEORETICAL DOCUMENTATION
 # ============================================================================

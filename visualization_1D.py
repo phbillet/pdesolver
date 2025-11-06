@@ -90,7 +90,13 @@ class Spectrum:
 # ============================================================================
 # CORE: SYMBOL GEOMETRY ENGINE
 # ============================================================================
-
+def _sanitize(expr):
+    """Remove DiracDelta, Heaviside, and undefined sign terms for numeric use."""
+    expr = expr.replace(sp.DiracDelta, lambda *args: 0)
+    expr = expr.replace(sp.Heaviside, lambda *args: 1)
+    expr = sp.simplify(expr)
+    return expr
+    
 class SymbolGeometry:
     """
     Analyzes the geometric structure of a symbol H(x, ξ)
@@ -126,11 +132,16 @@ class SymbolGeometry:
     
     def _compute_derivatives(self):
         """Compute all necessary derivatives (DRY)"""
-        self.dH_dx = sp.diff(self.H, self.x_sym)
-        self.dH_dxi = sp.diff(self.H, self.xi_sym)
-        self.d2H_dx2 = sp.diff(self.dH_dx, self.x_sym)
-        self.d2H_dxi2 = sp.diff(self.dH_dxi, self.xi_sym)
-        self.d2H_dxdxi = sp.diff(self.dH_dx, self.xi_sym)
+        dH_x = sp.diff(self.H, self.x_sym)
+        self.dH_dx = _sanitize(dH_x)
+        dH_xi = sp.diff(self.H, self.xi_sym)
+        self.dH_dxi = _sanitize(dH_xi)
+        d2H_x2 = sp.diff(self.dH_dx, self.x_sym)
+        self.d2H_dx2 = _sanitize(d2H_x2)        
+        d2H_xi2 = sp.diff(self.dH_dxi, self.xi_sym)
+        self.d2H_dxi2 = _sanitize(d2H_xi2)        
+        d2H_xxi = sp.diff(self.dH_dx, self.xi_sym)
+        self.d2H_dxdxi = _sanitize(d2H_xxi)
     
     def _lambdify_functions(self):
         """Convert symbolic expressions to numerical functions (DRY)"""
@@ -589,9 +600,10 @@ class SymbolVisualizer:
                 self._plot_stability(fig, periodic_orbits, 14)
                 self._plot_level_spacing(fig, spectrum, 15)
         
-        plt.suptitle(f'Geometric Atlas: H = {self.geo.H}', 
-                    fontsize=18, fontweight='bold')
-        plt.tight_layout()
+        plt.suptitle(f'Geometric and Semiclassical Atlas: H = {self.geo.H}',
+                     fontsize=18, fontweight='bold', y=0.995)
+        plt.tight_layout(rect=[0, 0, 1, 0.98])
+
         
         return fig
     
@@ -601,19 +613,24 @@ class SymbolVisualizer:
         """Panel 1: Hamiltonian surface in 3D"""
         ax = fig.add_subplot(3, 5, panel, projection='3d')
         ax.plot_surface(X, Xi, H_grid, cmap='viridis', alpha=0.8, 
-                       linewidth=0, antialiased=True)
+                        linewidth=0, antialiased=True)
         
         for geo in geodesics:
             color = getattr(geo, 'color', 'red')
             ax.plot(geo.x, geo.xi, geo.H, color=color, linewidth=3)
             ax.scatter([geo.x[0]], [geo.xi[0]], [geo.H[0]], 
-                      color=color, s=100, edgecolors='black', linewidths=2)
+                       color=color, s=100, edgecolors='black', linewidths=2)
         
         ax.set_xlabel('x')
         ax.set_ylabel('ξ')
         ax.set_zlabel('H(x,ξ)')
         ax.set_title('Hamiltonian Surface\n+ Geodesics', fontweight='bold')
         ax.view_init(elev=25, azim=45)
+        
+        # 🔧 Ajustements pour taille cohérente
+        ax.set_box_aspect((1, 1, 0.6))   # équilibre visuel (x, ξ, H)
+        ax.margins(0)                    # supprime marges internes
+        ax.set_proj_type('ortho')        # projection orthographique = moins de distorsion
     
     def _plot_level_sets(self, fig, X, Xi, H_grid, geodesics, panel):
         """Panel 2: Energy level sets (symplectic foliation)"""
@@ -630,7 +647,9 @@ class SymbolVisualizer:
         ax.set_ylabel('ξ')
         ax.set_title('Level Sets H=const\nSymplectic Foliation', fontweight='bold')
         ax.grid(True, alpha=0.3)
-        ax.set_aspect('equal')
+        ax.set_aspect('auto')     
+        ax.margins(0.05)          
+    
     
     def _plot_vector_field(self, fig, X, Xi, grids, geodesics, panel):
         """Panel 3: Hamiltonian vector field"""
