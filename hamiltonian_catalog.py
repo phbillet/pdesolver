@@ -4116,7 +4116,11 @@ def export_latex_table(category=None, filename='hamiltonians.tex'):
         Output file name.
     """
     import sympy as sp
+
+    # List of Hamiltonians to export
     hamiltonians = list_hamiltonians(category=category) if category else list(CATALOG.keys())
+
+    # LaTeX table header
     lines = [
         r"\begin{longtable}{|l|c|p{8cm}|}",
         r"\hline",
@@ -4130,16 +4134,26 @@ def export_latex_table(category=None, filename='hamiltonians.tex'):
         r"\hline",
         r"\endfoot",
     ]
+
+    # Add rows for each Hamiltonian
     for name in hamiltonians:
         info = CATALOG[name]
         H_latex = sp.latex(info['expr'])
         dim = info['dim']
-        lines.append(f"{name.replace('_', r'\_')} & {dim}D & ${H_latex}$ \\\\")
+        name_latex = name.replace('_', r'\_')
+        lines.append(f"{name_latex} & {dim}D & ${H_latex}$" + r" \\" + "\n")
         lines.append(r"\hline")
+
+    # End of the table
     lines.append(r"\end{longtable}")
-    with open(filename, 'w') as f:
-        f.write('\n'.join(lines))
-    print(f"Exported {len(hamiltonians)} Hamiltonians to {filename}")
+
+    # Write to file
+    try:
+        with open(filename, 'w') as f:
+            f.write('\n'.join(lines))
+        print(f"Exported {len(hamiltonians)} Hamiltonians to {filename}")
+    except IOError as e:
+        print(f"Error writing to file {filename}: {e}")
 
 def get_dimensional_analysis(name: str):
     """
