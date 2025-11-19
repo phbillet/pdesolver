@@ -3,6 +3,9 @@
 ![Test Notebooks](https://github.com/phbillet/pdesolver/actions/workflows/test-notebooks.yml/badge.svg)
 
 ---
+This project, **pdesolver**, is now deprecated and has been replaced by **[psipy](https://github.com/phbillet/psipy)**, which offers expanded functionality and improved tools for computational physics and symbolic mathematics.
+---
+
 
 ## ✨ Overview
 
